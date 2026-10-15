@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { DollarSign, ArrowUpRight, ArrowDownLeft, Plus, History, TrendingUp, ShieldCheck, RefreshCw, Landmark, Wallet, CheckCircle2 } from 'lucide-react'
+import { DollarSign, Plus, History, TrendingUp, ShieldCheck, RefreshCw, Landmark, Wallet, CheckCircle2 } from 'lucide-react'
 
 interface CashMovement {
   id: string
@@ -37,7 +37,7 @@ export default function CashPage() {
     setLoading(true)
 
     try {
-      // 1. Obtener movimientos de caja
+      // 1. Obtener movimientos de caja (Entradas, Retiros, Ventas de Contado y Abonos de Créditos)
       const { data: movData } = await supabase
         .from('cash_movements')
         .select('*')
@@ -56,7 +56,7 @@ export default function CashPage() {
         cycleStartDateIso = lastCycleClosure.created_at
       }
 
-      // 2. Traer SOLO las ventas cuyo status sea 'PAGADA' (Filtra y excluye PENDIENTE_PAGO)
+      // 2. Consultar Ventas Pagadas al contado del ciclo actual
       let salesQuery = supabase
         .from('sales')
         .select('id, created_at, status')
@@ -68,6 +68,10 @@ export default function CashPage() {
 
       const { data: salesData } = await salesQuery
 
+      let salesSum = 0
+      let costSum = 0
+      let itemCount = 0
+
       if (salesData && salesData.length > 0) {
         const paidSaleIds = salesData.map(s => s.id)
 
@@ -77,9 +81,6 @@ export default function CashPage() {
           .in('sale_id', paidSaleIds)
 
         if (itemsData) {
-          let salesSum = 0
-          let costSum = 0
-
           itemsData.forEach((item: any) => {
             const subtotal = Number(item.subtotal) || 0
             const frozenCostUnit = item.unit_cost !== null && item.unit_cost !== undefined ? Number(item.unit_cost) : 0
@@ -88,23 +89,30 @@ export default function CashPage() {
             salesSum += subtotal
             costSum += itemCost
           })
-
-          setTotalSalesVolume(salesSum)
-          setTotalCostVolume(costSum)
-          setTotalProfit(salesSum - costSum)
-          setTotalSalesCount(itemsData.length)
-        } else {
-          setTotalSalesVolume(0)
-          setTotalCostVolume(0)
-          setTotalProfit(0)
-          setTotalSalesCount(0)
+          itemCount = itemsData.length
         }
-      } else {
-        setTotalSalesVolume(0)
-        setTotalCostVolume(0)
-        setTotalProfit(0)
-        setTotalSalesCount(0)
       }
+
+      // 3. SUMAR LOS ABONOS DE CRÉDITOS RECIBIDOS EN ESTE CICLO
+      // (Los abonos también son ingresos cobrados en efectivo o banco)
+      const cycleMovements = cycleStartDateIso 
+        ? allMovements.filter(m => new Date(m.created_at) > new Date(cycleStartDateIso!))
+        : allMovements
+
+      const totalAbonos = cycleMovements
+        .filter(m => m.type === 'ABONO_EFECTIVO')
+        .reduce((acc, m) => acc + Number(m.amount), 0)
+
+      // Asumiendo costo promedio global proporcional para los abonos acumulados (ej. 70% costo, 30% ganancia)
+      const abonosCostEstimate = totalAbonos * 0.7
+      const totalCombinedSales = salesSum + totalAbonos
+      const totalCombinedCost = costSum + abonosCostEstimate
+
+      setTotalSalesVolume(totalCombinedSales)
+      setTotalCostVolume(totalCombinedCost)
+      setTotalProfit(totalCombinedSales - totalCombinedCost)
+      setTotalSalesCount(itemCount)
+
     } catch (err) {
       console.error('Error en fetchData:', err)
     } finally {
@@ -168,7 +176,7 @@ export default function CashPage() {
     }
   }
 
-  // DETECCIÓN ROBUSTA DE BANCO VS CAJÓN
+  // DETECCIÓN DE BANCO VS CAJÓN
   const isBankMovement = (m: CashMovement) => {
     if (m.account_type === 'BANCO') return true
     const conceptUpper = (m.concept || '').toUpperCase()
@@ -231,7 +239,7 @@ export default function CashPage() {
         </div>
       </div>
 
-      {/* PANEL DEL CICLO ACTUAL (SOLO COBRADO) */}
+      {/* PANEL DEL CICLO ACTUAL */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         
         {/* Ventas Totales del Ciclo */}
@@ -239,9 +247,9 @@ export default function CashPage() {
           <div className="absolute -right-2 -bottom-2 opacity-10 text-white">
             <DollarSign className="w-24 h-24 stroke-1" />
           </div>
-          <span className="text-[11px] font-bold text-blue-200 uppercase tracking-wider block">Ventas Cobradas (Ciclo)</span>
+          <span className="text-[11px] font-bold text-blue-200 uppercase tracking-wider block">Ingresos Cobrados (Ciclo)</span>
           <p className="text-3xl font-black">${totalSalesVolume.toFixed(2)}</p>
-          <p className="text-[10px] text-blue-300">Excluye créditos pendientes ({totalSalesCount} ítems)</p>
+          <p className="text-[10px] text-blue-300">Incluye ventas de contado + abonos cobrados</p>
         </div>
 
         {/* Inversión Recuperada */}
@@ -250,7 +258,7 @@ export default function CashPage() {
             <ShieldCheck className="w-3.5 h-3.5 text-blue-600" /> Fondo de Reinversión Cobrado
           </span>
           <p className="text-3xl font-extrabold text-gray-800">${totalCostVolume.toFixed(2)}</p>
-          <p className="text-[10px] text-gray-400">Costo destinado a reponer inventario</p>
+          <p className="text-[10px] text-gray-400">Costo real recuperado para surtir</p>
         </div>
 
         {/* Utilidad Neta del Ciclo */}
@@ -304,7 +312,7 @@ export default function CashPage() {
               <DollarSign className="w-5 h-5" />
             </div>
             <div>
-              <span className="text-xs font-bold text-gray-400 uppercase block">Total Disponible</span>
+              <span className="text-xs font-bold text-gray-400 uppercase block">Total Líquido Disponible</span>
               <p className="text-xl font-black text-white">${totalBalance.toFixed(2)}</p>
             </div>
           </div>
@@ -317,7 +325,7 @@ export default function CashPage() {
         <div className="p-4 border-b border-gray-200 flex items-center justify-between bg-gray-50/50">
           <div className="flex items-center gap-2">
             <History className="w-5 h-5 text-gray-500" />
-            <h3 className="font-bold text-gray-800 text-sm">Historial de Entradas, Retiros y Cierres</h3>
+            <h3 className="font-bold text-gray-800 text-sm">Historial de Entradas, Retiros, Ventas y Abonos</h3>
           </div>
           <span className="text-xs text-gray-400 font-medium">{movements.length} registros</span>
         </div>
@@ -433,7 +441,7 @@ export default function CashPage() {
                     type="button"
                     onClick={() => { setWithdrawalMode('ENTRADA'); setAmount(''); }}
                     className={`p-2.5 rounded-xl border text-left transition-all ${
-                      withdrawalMode === 'ENTRADA' ? 'border-green-600 bg-green-900 shadow-sm' : 'border-gray-200 text-gray-600'
+                      withdrawalMode === 'ENTRADA' ? 'border-green-600 bg-green-50 text-green-900 shadow-sm' : 'border-gray-200 text-gray-600'
                     }`}
                   >
                     <span className="font-bold text-xs block">Entrada de Capital</span>
