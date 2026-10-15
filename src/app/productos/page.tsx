@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Product, Category } from '@/types'
-import { Plus, Search, Package, AlertTriangle, Edit3, ArrowUpCircle } from 'lucide-react'
+import { Plus, Search, Package, AlertTriangle, ArrowUpCircle, Tag } from 'lucide-react'
 
 export default function ProductsPage() {
   const supabase = createClient()
@@ -13,8 +13,11 @@ export default function ProductsPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [loading, setLoading] = useState(true)
 
-  // Estados para Modal de Nuevo Producto
+  // Modales
   const [showNewModal, setShowNewModal] = useState(false)
+  const [showCatModal, setShowCatModal] = useState(false)
+
+  // Formulario Producto
   const [categoryId, setCategoryId] = useState('')
   const [name, setName] = useState('')
   const [price, setPrice] = useState('')
@@ -24,13 +27,17 @@ export default function ProductsPage() {
   const [imageUrl, setImageUrl] = useState('')
   const [saving, setSaving] = useState(false)
 
-  // Estados para Ajuste de Stock
+  // Formulario Categoría
+  const [catName, setCatName] = useState('')
+  const [catPrefix, setCatPrefix] = useState('')
+
+  // Surtir Stock
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
   const [addStockAmount, setAddStockAmount] = useState('')
 
   const fetchData = async () => {
     setLoading(true)
-    const { data: catData } = await supabase.from('categories').select('*')
+    const { data: catData } = await supabase.from('categories').select('*').order('name', { ascending: true })
     const { data: prodData } = await supabase.from('products').select('*').order('created_at', { ascending: false })
 
     if (catData) setCategories(catData)
@@ -42,7 +49,32 @@ export default function ProductsPage() {
     fetchData()
   }, [])
 
-  // Guardar nuevo producto con autogeneración de SKU
+  // Crear Categoría
+  const handleCreateCategory = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!catName.trim() || !catPrefix.trim()) return
+
+    const { data, error } = await supabase
+      .from('categories')
+      .insert({
+        name: catName.trim(),
+        code_prefix: catPrefix.trim().toUpperCase().slice(0, 4)
+      })
+      .select()
+      .single()
+
+    if (error) {
+      alert('Error al crear categoría. Asegúrate de que el prefijo sea único.')
+    } else if (data) {
+      setCatName('')
+      setCatPrefix('')
+      setShowCatModal(false)
+      await fetchData()
+      setCategoryId(data.id) // Autoseleccionar la recién creada
+    }
+  }
+
+  // Crear Producto
   const handleCreateProduct = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!name.trim() || !categoryId) {
@@ -56,7 +88,6 @@ export default function ProductsPage() {
       const selectedCat = categories.find(c => c.id === categoryId)
       const prefix = selectedCat ? selectedCat.code_prefix : 'GEN'
 
-      // Contar cuántos productos existen con ese prefijo para generar el consecutivo
       const { count } = await supabase
         .from('products')
         .select('*', { count: 'exact', head: true })
@@ -94,7 +125,6 @@ export default function ProductsPage() {
     }
   }
 
-  // Sumar existencias de mercancía
   const handleAddStock = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!selectedProduct) return
@@ -127,24 +157,30 @@ export default function ProductsPage() {
 
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6">
-      
-      {/* ENCABEZADO */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Catálogo e Inventario</h1>
           <p className="text-sm text-gray-500">Maneja productos, entradas de mercancía y existencias.</p>
         </div>
 
-        <button
-          onClick={() => setShowNewModal(true)}
-          className="py-2.5 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold flex items-center gap-2 shadow-sm text-sm"
-        >
-          <Plus className="w-4 h-4" />
-          Nuevo Producto
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setShowCatModal(true)}
+            className="py-2.5 px-3 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-xl font-bold flex items-center gap-1.5 text-sm"
+          >
+            <Tag className="w-4 h-4 text-gray-600" />
+            Nueva Categoría
+          </button>
+          <button
+            onClick={() => setShowNewModal(true)}
+            className="py-2.5 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold flex items-center gap-2 shadow-sm text-sm"
+          >
+            <Plus className="w-4 h-4" />
+            Nuevo Producto
+          </button>
+        </div>
       </div>
 
-      {/* BARRA DE BÚSQUEDA */}
       <div className="relative">
         <Search className="absolute left-3 top-3 text-gray-400 w-5 h-5" />
         <input
@@ -152,15 +188,14 @@ export default function ProductsPage() {
           placeholder="Buscar producto por nombre o código..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          className="w-full pl-10 pr-4 py-2.5 bg-white rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="w-full pl-10 pr-4 py-2.5 bg-white rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
         />
       </div>
 
-      {/* TABLA DE PRODUCTOS */}
       <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
         <table className="w-full text-left border-collapse">
           <thead>
-            <tr className="bg-gray-50 border-b border-gray-200 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+            <tr className="bg-gray-50 border-b border-gray-200 text-xs font-semibold text-gray-500 uppercase">
               <th className="p-4">Código</th>
               <th className="p-4">Producto</th>
               <th className="p-4">Precio Venta</th>
@@ -190,9 +225,8 @@ export default function ProductsPage() {
                       {isOutOfStock ? (
                         <span className="text-xs font-bold text-red-600 bg-red-100 px-2.5 py-1 rounded-full">Agotado (0)</span>
                       ) : isLowStock ? (
-                        <span className="text-xs font-bold text-amber-700 bg-amber-100 px-2.5 py-1 rounded-full flex items-center gap-1 w-fit">
-                          <AlertTriangle className="w-3 h-3" />
-                          ¡Bajo ({p.stock})!
+                        <span className="text-xs font-bold text-amber-700 bg-amber-100 px-2.5 py-1 rounded-full inline-flex items-center gap-1">
+                          <AlertTriangle className="w-3 h-3" /> ¡Bajo ({p.stock})!
                         </span>
                       ) : (
                         <span className="font-semibold text-gray-700">{p.stock} unidades</span>
@@ -215,11 +249,70 @@ export default function ProductsPage() {
         </table>
       </div>
 
+      {/* MODAL: NUEVA CATEGORÍA */}
+      {showCatModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-xl space-y-4">
+            <h3 className="text-lg font-bold text-gray-900">Agregar Nueva Categoría</h3>
+            <form onSubmit={handleCreateCategory} className="space-y-3">
+              <div>
+                <label className="text-xs font-semibold text-gray-600">Nombre de Categoría *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ej. Papitas / Chicles / Refrescos"
+                  value={catName}
+                  onChange={(e) => setCatName(e.target.value)}
+                  className="w-full mt-1 p-2 bg-gray-50 border rounded-lg text-sm"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-gray-600">Prefijo para Código (3-4 Letras) *</label>
+                <input
+                  type="text"
+                  required
+                  maxLength={4}
+                  placeholder="Ej. SAB, GAL, BEB"
+                  value={catPrefix}
+                  onChange={(e) => setCatPrefix(e.target.value.toUpperCase())}
+                  className="w-full mt-1 p-2 bg-gray-50 border rounded-lg text-sm font-mono font-bold uppercase"
+                />
+              </div>
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowCatModal(false)}
+                  className="flex-1 py-2 bg-gray-100 text-gray-700 rounded-lg text-xs font-bold"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-2 bg-blue-600 text-white rounded-lg text-xs font-bold"
+                >
+                  Guardar Categoría
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* MODAL: NUEVO PRODUCTO */}
       {showNewModal && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl space-y-4">
-            <h3 className="text-lg font-bold text-gray-900">Agregar Producto al Catálogo</h3>
+            <div className="flex justify-between items-center">
+              <h3 className="text-lg font-bold text-gray-900">Agregar Producto al Catálogo</h3>
+              <button
+                type="button"
+                onClick={() => { setShowNewModal(false); setShowCatModal(true); }}
+                className="text-xs text-blue-600 hover:underline font-bold"
+              >
+                + Crear Categoría
+              </button>
+            </div>
+
             <form onSubmit={handleCreateProduct} className="space-y-3">
               <div>
                 <label className="text-xs font-semibold text-gray-600">Categoría *</label>
@@ -234,6 +327,11 @@ export default function ProductsPage() {
                     <option key={c.id} value={c.id}>{c.name} ({c.code_prefix})</option>
                   ))}
                 </select>
+                {categories.length === 0 && (
+                  <p className="text-[11px] text-amber-600 mt-1">
+                    No hay categorías aún. Haz clic arriba en "+ Crear Categoría".
+                  </p>
+                )}
               </div>
 
               <div>
@@ -241,7 +339,7 @@ export default function ProductsPage() {
                 <input
                   type="text"
                   required
-                  placeholder="Ej. Doritos Nacho 58g"
+                  placeholder="Ej. Cheetos Flamin Hot 45g"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   className="w-full mt-1 p-2 bg-gray-50 border rounded-lg text-sm"
@@ -255,7 +353,7 @@ export default function ProductsPage() {
                     type="number"
                     required
                     step="0.5"
-                    placeholder="20.00"
+                    placeholder="18.00"
                     value={price}
                     onChange={(e) => setPrice(e.target.value)}
                     className="w-full mt-1 p-2 bg-gray-50 border rounded-lg text-sm font-bold"
@@ -266,7 +364,7 @@ export default function ProductsPage() {
                   <input
                     type="number"
                     step="0.5"
-                    placeholder="15.00"
+                    placeholder="14.00"
                     value={costPrice}
                     onChange={(e) => setCostPrice(e.target.value)}
                     className="w-full mt-1 p-2 bg-gray-50 border rounded-lg text-sm"
@@ -317,8 +415,10 @@ export default function ProductsPage() {
                 </button>
                 <button
                   type="submit"
-                  disabled={saving}
-                  className="flex-1 py-2.5 bg-blue-600 text-white rounded-lg text-xs font-bold"
+                  disabled={saving || categories.length === 0}
+                  className={`flex-1 py-2.5 rounded-lg text-xs font-bold text-white ${
+                    saving || categories.length === 0 ? 'bg-gray-300' : 'bg-blue-600 hover:bg-blue-700'
+                  }`}
                 >
                   {saving ? 'Guardando...' : 'Guardar Producto'}
                 </button>
@@ -369,7 +469,6 @@ export default function ProductsPage() {
           </div>
         </div>
       )}
-
     </div>
   )
 }
