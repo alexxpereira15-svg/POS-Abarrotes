@@ -56,8 +56,11 @@ export default function CashPage() {
         cycleStartDateIso = lastCycleClosure.created_at
       }
 
-      // 2. Traer las ventas de la base de datos
-      let salesQuery = supabase.from('sales').select('id, created_at, payment_status')
+      // 2. Traer SOLO las ventas cuyo status sea 'PAGADA' (Filtra y excluye PENDIENTE_PAGO)
+      let salesQuery = supabase
+        .from('sales')
+        .select('id, created_at, status')
+        .eq('status', 'PAGADA')
 
       if (cycleStartDateIso) {
         salesQuery = salesQuery.gt('created_at', cycleStartDateIso)
@@ -66,45 +69,12 @@ export default function CashPage() {
       const { data: salesData } = await salesQuery
 
       if (salesData && salesData.length > 0) {
-        // Filtrar solo las ventas pagadas (excluir créditos no cobrados)
-        const paidSales = salesData.filter((s: any) => s.payment_status !== 'PENDIENTE' && s.payment_status !== 'CREDITO')
-        const paidSaleIds = paidSales.map(s => s.id)
+        const paidSaleIds = salesData.map(s => s.id)
 
-        if (paidSaleIds.length > 0) {
-          const { data: itemsData } = await supabase
-            .from('sale_items')
-            .select('quantity, subtotal, unit_price, unit_cost')
-            .in('sale_id', paidSaleIds)
-
-          if (itemsData) {
-            let salesSum = 0
-            let costSum = 0
-
-            itemsData.forEach((item: any) => {
-              const subtotal = Number(item.subtotal) || 0
-              const frozenCostUnit = item.unit_cost !== null && item.unit_cost !== undefined ? Number(item.unit_cost) : 0
-              const itemCost = frozenCostUnit * (Number(item.quantity) || 1)
-
-              salesSum += subtotal
-              costSum += itemCost
-            })
-
-            setTotalSalesVolume(salesSum)
-            setTotalCostVolume(costSum)
-            setTotalProfit(salesSum - costSum)
-            setTotalSalesCount(itemsData.length)
-          }
-        } else {
-          setTotalSalesVolume(0)
-          setTotalCostVolume(0)
-          setTotalProfit(0)
-          setTotalSalesCount(0)
-        }
-      } else {
-        // Fallback: Traer todos los sale_items si no hay ventas devueltas en la tabla sales
         const { data: itemsData } = await supabase
           .from('sale_items')
           .select('quantity, subtotal, unit_price, unit_cost')
+          .in('sale_id', paidSaleIds)
 
         if (itemsData) {
           let salesSum = 0
@@ -123,7 +93,17 @@ export default function CashPage() {
           setTotalCostVolume(costSum)
           setTotalProfit(salesSum - costSum)
           setTotalSalesCount(itemsData.length)
+        } else {
+          setTotalSalesVolume(0)
+          setTotalCostVolume(0)
+          setTotalProfit(0)
+          setTotalSalesCount(0)
         }
+      } else {
+        setTotalSalesVolume(0)
+        setTotalCostVolume(0)
+        setTotalProfit(0)
+        setTotalSalesCount(0)
       }
     } catch (err) {
       console.error('Error en fetchData:', err)
@@ -251,7 +231,7 @@ export default function CashPage() {
         </div>
       </div>
 
-      {/* PANEL DEL CICLO ACTUAL */}
+      {/* PANEL DEL CICLO ACTUAL (SOLO COBRADO) */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         
         {/* Ventas Totales del Ciclo */}
@@ -259,15 +239,15 @@ export default function CashPage() {
           <div className="absolute -right-2 -bottom-2 opacity-10 text-white">
             <DollarSign className="w-24 h-24 stroke-1" />
           </div>
-          <span className="text-[11px] font-bold text-blue-200 uppercase tracking-wider block">Ventas en Ciclo Actual</span>
+          <span className="text-[11px] font-bold text-blue-200 uppercase tracking-wider block">Ventas Cobradas (Ciclo)</span>
           <p className="text-3xl font-black">${totalSalesVolume.toFixed(2)}</p>
-          <p className="text-[10px] text-blue-300">Ingreso acumulado ({totalSalesCount} ítems)</p>
+          <p className="text-[10px] text-blue-300">Excluye créditos pendientes ({totalSalesCount} ítems)</p>
         </div>
 
         {/* Inversión Recuperada */}
         <div className="p-5 bg-white border border-gray-200 rounded-2xl shadow-sm space-y-1">
           <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider block flex items-center gap-1">
-            <ShieldCheck className="w-3.5 h-3.5 text-blue-600" /> Fondo de Reinversión
+            <ShieldCheck className="w-3.5 h-3.5 text-blue-600" /> Fondo de Reinversión Cobrado
           </span>
           <p className="text-3xl font-extrabold text-gray-800">${totalCostVolume.toFixed(2)}</p>
           <p className="text-[10px] text-gray-400">Costo destinado a reponer inventario</p>
@@ -276,7 +256,7 @@ export default function CashPage() {
         {/* Utilidad Neta del Ciclo */}
         <div className="p-5 bg-emerald-50 border border-emerald-200 rounded-2xl shadow-sm space-y-1">
           <span className="text-[11px] font-bold text-emerald-800 uppercase tracking-wider block flex items-center gap-1">
-            <TrendingUp className="w-3.5 h-3.5 text-emerald-600" /> Ganancia Neta Acumulada
+            <TrendingUp className="w-3.5 h-3.5 text-emerald-600" /> Ganancia Neta Cobrada
           </span>
           <p className="text-3xl font-black text-emerald-700">${totalProfit.toFixed(2)}</p>
           <div className="flex items-center gap-1 mt-1">
@@ -453,7 +433,7 @@ export default function CashPage() {
                     type="button"
                     onClick={() => { setWithdrawalMode('ENTRADA'); setAmount(''); }}
                     className={`p-2.5 rounded-xl border text-left transition-all ${
-                      withdrawalMode === 'ENTRADA' ? 'border-green-600 bg-green-50 text-green-900 shadow-sm' : 'border-gray-200 text-gray-600'
+                      withdrawalMode === 'ENTRADA' ? 'border-green-600 bg-green-900 shadow-sm' : 'border-gray-200 text-gray-600'
                     }`}
                   >
                     <span className="font-bold text-xs block">Entrada de Capital</span>
