@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Product, Category } from '@/types'
-import { Plus, Search, Package, AlertTriangle, ArrowUpCircle, Tag, Edit3, Trash2 } from 'lucide-react'
+import { Plus, Search, Package, AlertTriangle, ArrowUpCircle, Tag, Edit3, Trash2, Calculator } from 'lucide-react'
 
 export default function ProductsPage() {
   const supabase = createClient()
@@ -32,9 +32,10 @@ export default function ProductsPage() {
   const [catName, setCatName] = useState('')
   const [catPrefix, setCatPrefix] = useState('')
 
-  // Surtir Stock
+  // Surtir Stock + Cálculo de Costo Ponderado
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
   const [addStockAmount, setAddStockAmount] = useState('')
+  const [newBatchCost, setNewBatchCost] = useState('')
 
   const fetchData = async () => {
     setLoading(true)
@@ -49,6 +50,13 @@ export default function ProductsPage() {
   useEffect(() => {
     fetchData()
   }, [])
+
+  // Al abrir el modal de surtir, precargar el costo actual
+  const openStockModal = (p: Product) => {
+    setSelectedProduct(p)
+    setAddStockAmount('')
+    setNewBatchCost((p.cost_price || 0).toString())
+  }
 
   // Crear Categoría
   const handleCreateCategory = async (e: React.FormEvent) => {
@@ -187,28 +195,56 @@ export default function ProductsPage() {
     }
   }
 
-  const handleAddStock = async (e: React.FormEvent) => {
+  // Surtir Stock con Cálculo de Costo Promedio Ponderado
+  const handleAddStockWithWeightedCost = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!selectedProduct) return
 
-    const added = parseInt(addStockAmount)
-    if (isNaN(added) || added <= 0) return
+    const addedQty = parseInt(addStockAmount)
+    const newCostUnit = parseFloat(newBatchCost)
+
+    if (isNaN(addedQty) || addedQty <= 0) {
+      alert('Ingresa una cantidad válida a agregar.')
+      return
+    }
+
+    if (isNaN(newCostUnit) || newCostUnit < 0) {
+      alert('Ingresa un costo de compra válido.')
+      return
+    }
 
     try {
-      const newStock = selectedProduct.stock + added
+      const currentStock = selectedProduct.stock > 0 ? selectedProduct.stock : 0
+      const currentCost = selectedProduct.cost_price || 0
+
+      // FÓRMULA DE COSTO PROMEDIO PONDERADO
+      let calculatedWeightedCost = newCostUnit
+      if (currentStock > 0) {
+        const totalPreviousValue = currentStock * currentCost
+        const totalNewValue = addedQty * newCostUnit
+        const totalStock = currentStock + addedQty
+        calculatedWeightedCost = (totalPreviousValue + totalNewValue) / totalStock
+      }
+
+      const finalStock = currentStock + addedQty
+
       const { error } = await supabase
         .from('products')
-        .update({ stock: newStock })
+        .update({
+          stock: finalStock,
+          cost_price: parseFloat(calculatedWeightedCost.toFixed(2))
+        })
         .eq('id', selectedProduct.id)
 
       if (error) throw error
 
       setSelectedProduct(null)
       setAddStockAmount('')
+      setNewBatchCost('')
       fetchData()
     } catch (err) {
       console.error(err)
-      alert('Error al actualizar stock.')
+      alert('Error al surtir mercancía.')
     }
   }
 
@@ -216,6 +252,12 @@ export default function ProductsPage() {
     p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     p.sku_code.toLowerCase().includes(searchQuery.toLowerCase())
   )
+
+  // Cálculo rápido para previsualizar en el modal
+  const previewStock = (selectedProduct?.stock || 0) + (parseInt(addStockAmount) || 0)
+  const currentTotalVal = (selectedProduct?.stock || 0) * (selectedProduct?.cost_price || 0)
+  const newTotalVal = (parseInt(addStockAmount) || 0) * (parseFloat(newBatchCost) || 0)
+  const previewWeightedCost = previewStock > 0 ? (currentTotalVal + newTotalVal) / previewStock : 0
 
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6">
@@ -269,7 +311,7 @@ export default function ProductsPage() {
             <tr className="bg-gray-50 border-b border-gray-200 text-xs font-semibold text-gray-500 uppercase">
               <th className="p-4">Código</th>
               <th className="p-4">Producto</th>
-              <th className="p-4">Costo</th>
+              <th className="p-4">Costo Promedio</th>
               <th className="p-4">Precio Venta</th>
               <th className="p-4">Stock Actual</th>
               <th className="p-4 text-right">Acciones</th>
@@ -292,7 +334,7 @@ export default function ProductsPage() {
                       <Package className="w-4 h-4 text-gray-400" />
                       {p.name}
                     </td>
-                    <td className="p-4 text-gray-500">${(p.cost_price || 0).toFixed(2)}</td>
+                    <td className="p-4 text-gray-600 font-semibold">${(p.cost_price || 0).toFixed(2)}</td>
                     <td className="p-4 font-extrabold text-gray-900">${p.price.toFixed(2)}</td>
                     <td className="p-4">
                       {isOutOfStock ? (
@@ -315,7 +357,7 @@ export default function ProductsPage() {
                         Editar
                       </button>
                       <button
-                        onClick={() => setSelectedProduct(p)}
+                        onClick={() => openStockModal(p)}
                         className="py-1.5 px-2.5 bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-lg font-bold text-xs inline-flex items-center gap-1"
                       >
                         <ArrowUpCircle className="w-3.5 h-3.5" />
@@ -375,7 +417,7 @@ export default function ProductsPage() {
                   <label className="text-xs font-semibold text-gray-600">Costo Compra ($)</label>
                   <input
                     type="number"
-                    step="0.5"
+                    step="0.01"
                     value={costPrice}
                     onChange={(e) => setCostPrice(e.target.value)}
                     className="w-full mt-1 p-2 bg-gray-50 border rounded-lg text-sm font-bold text-gray-700"
@@ -556,7 +598,7 @@ export default function ProductsPage() {
                   <label className="text-xs font-semibold text-gray-600">Costo Compra ($)</label>
                   <input
                     type="number"
-                    step="0.5"
+                    step="0.01"
                     placeholder="14.00"
                     value={costPrice}
                     onChange={(e) => setCostPrice(e.target.value)}
@@ -621,27 +663,69 @@ export default function ProductsPage() {
         </div>
       )}
 
-      {/* MODAL: SURTIR STOCK */}
+      {/* MODAL: SURTIR STOCK + CÁLCULO PROMEDIO PONDERADO */}
       {selectedProduct && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-xl space-y-4">
-            <h3 className="text-lg font-bold text-gray-900">Surtir Mercancía</h3>
-            <p className="text-xs text-gray-500">Producto: <span className="font-bold text-gray-800">{selectedProduct.name}</span></p>
-            <p className="text-xs text-gray-600">Stock actual: <span className="font-bold">{selectedProduct.stock} unidades</span></p>
-
-            <form onSubmit={handleAddStock} className="space-y-3">
+            <div className="flex items-center gap-2 border-b pb-3">
+              <Calculator className="w-5 h-5 text-blue-600" />
               <div>
-                <label className="text-xs font-semibold text-gray-600">Piezas a agregar (+)</label>
+                <h3 className="text-base font-bold text-gray-900">Surtir Mercancía</h3>
+                <p className="text-xs text-gray-500">{selectedProduct.name} ({selectedProduct.sku_code})</p>
+              </div>
+            </div>
+
+            <div className="bg-gray-50 p-3 rounded-xl text-xs space-y-1">
+              <div className="flex justify-between">
+                <span className="text-gray-500">Stock Actual:</span>
+                <span className="font-bold text-gray-800">{selectedProduct.stock} unidades</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500">Costo Actual:</span>
+                <span className="font-bold text-gray-800">${(selectedProduct.cost_price || 0).toFixed(2)} c/u</span>
+              </div>
+            </div>
+
+            <form onSubmit={handleAddStockWithWeightedCost} className="space-y-3">
+              <div>
+                <label className="text-xs font-semibold text-gray-600">Piezas Nuevas a Agregar (+)</label>
                 <input
                   type="number"
                   required
                   min="1"
-                  placeholder="Ej. 12"
+                  placeholder="Ej. 3"
                   value={addStockAmount}
                   onChange={(e) => setAddStockAmount(e.target.value)}
-                  className="w-full mt-1 p-2.5 bg-gray-50 border rounded-lg text-lg font-bold text-blue-700"
+                  className="w-full mt-1 p-2 bg-gray-50 border rounded-lg text-sm font-bold text-blue-700"
                 />
               </div>
+
+              <div>
+                <label className="text-xs font-semibold text-gray-600">Costo Unitario del Nuevo Lote ($)</label>
+                <input
+                  type="number"
+                  required
+                  step="0.01"
+                  placeholder="Ej. 15.00"
+                  value={newBatchCost}
+                  onChange={(e) => setNewBatchCost(e.target.value)}
+                  className="w-full mt-1 p-2 bg-gray-50 border rounded-lg text-sm font-bold text-gray-800"
+                />
+              </div>
+
+              {/* Previsualización del Promedio Ponderado */}
+              {parseInt(addStockAmount) > 0 && parseFloat(newBatchCost) >= 0 && (
+                <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl space-y-1 text-xs">
+                  <div className="flex justify-between font-semibold text-blue-900">
+                    <span>Nuevo Stock Total:</span>
+                    <span>{previewStock} unidades</span>
+                  </div>
+                  <div className="flex justify-between font-bold text-blue-900 pt-1 border-t border-blue-200/50">
+                    <span>Nuevo Costo Promedio:</span>
+                    <span className="text-sm font-black text-blue-700">${previewWeightedCost.toFixed(2)} c/u</span>
+                  </div>
+                </div>
+              )}
 
               <div className="flex gap-2 pt-2">
                 <button
@@ -653,9 +737,9 @@ export default function ProductsPage() {
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 py-2.5 bg-blue-600 text-white rounded-lg text-xs font-bold"
+                  className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold"
                 >
-                  Agregar Stock
+                  Surtir y Actualizar
                 </button>
               </div>
             </form>
