@@ -10,7 +10,7 @@ interface CartItem extends Product {
 }
 
 // ⚠️ NÚMERO DE WHATSAPP PARA RECIBIR PEDIDOS Y SUGERENCIAS
-const WHATSAPP_NUMBER = '529991234567'
+const WHATSAPP_NUMBER = '52993557616'
 
 export default function CatalogPage() {
   const supabase = createClient()
