@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Customer } from '@/types'
-import { UserPlus, Search, DollarSign, History, CheckCircle, CreditCard } from 'lucide-react'
+import { UserPlus, Search, DollarSign, FileText, Share2, X, CreditCard } from 'lucide-react'
 
 export default function CustomersPage() {
   const supabase = createClient()
@@ -12,13 +12,18 @@ export default function CustomersPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [loading, setLoading] = useState(true)
 
-  // Estados para nuevo cliente
+  // Modales
   const [showNewModal, setShowNewModal] = useState(false)
+  const [statementCustomer, setStatementCustomer] = useState<Customer | null>(null)
+  const [statementData, setStatementData] = useState<{ sales: any[]; payments: any[] }>({ sales: [], payments: [] })
+  const [loadingStatement, setLoadingStatement] = useState(false)
+
+  // Formulario Nuevo Cliente
   const [fullName, setFullName] = useState('')
   const [phone, setPhone] = useState('')
   const [creditLimit, setCreditLimit] = useState('500')
 
-  // Estados para registrar abono
+  // Formulario Abono
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null)
   const [paymentAmount, setPaymentAmount] = useState('')
   const [paymentMethod, setPaymentMethod] = useState<'EFECTIVO' | 'TRANSFERENCIA'>('EFECTIVO')
@@ -36,7 +41,78 @@ export default function CustomersPage() {
     fetchCustomers()
   }, [])
 
-  // Guardar nuevo cliente
+  // Cargar Estado de Cuenta (Compras fiadas + Abonos)
+  const openStatement = async (c: Customer) => {
+    setStatementCustomer(c)
+    setLoadingStatement(true)
+
+    try {
+      // 1. Consultar ventas a crédito con sus items
+      const { data: salesData } = await supabase
+        .from('sales')
+        .select(`
+          id, sale_code, total_amount, created_at,
+          sale_items (
+            quantity, unit_price, subtotal,
+            products ( name )
+          )
+        `)
+        .eq('customer_id', c.id)
+        .eq('payment_type', 'CREDITO')
+        .order('created_at', { ascending: false })
+
+      // 2. Consultar abonos
+      const { data: paymentsData } = await supabase
+        .from('customer_payments')
+        .select('*')
+        .eq('customer_id', c.id)
+        .order('created_at', { ascending: false })
+
+      setStatementData({
+        sales: salesData || [],
+        payments: paymentsData || []
+      })
+    } catch (err) {
+      console.error(err)
+    } finally {
+      setLoadingStatement(false)
+    }
+  }
+
+  // Generar WhatsApp con Estado de Cuenta
+  const generateStatementWhatsApp = () => {
+    if (!statementCustomer) return ''
+
+    let text = `*Estado de Cuenta - La Tiendita*\n`
+    text += `Cliente: *${statementCustomer.full_name}*\n`
+    text += `Fecha: ${new Date().toLocaleDateString('es-MX')}\n`
+    text += `--------------------------------\n`
+    text += `*DEUDA ACTUAL PENDIENTE: $${statementCustomer.current_balance.toFixed(2)}*\n`
+    text += `--------------------------------\n\n`
+
+    if (statementData.sales.length > 0) {
+      text += `*Últimas Compras Fiadas:*\n`
+      statementData.sales.forEach(sale => {
+        text += `• *${sale.sale_code}* (${new Date(sale.created_at).toLocaleDateString('es-MX')}): $${sale.total_amount.toFixed(2)}\n`
+        sale.sale_items?.forEach((item: any) => {
+          text += `  - ${item.quantity}x ${item.products?.name || 'Producto'} ($${item.subtotal.toFixed(2)})\n`
+        })
+      })
+    }
+
+    if (statementData.payments.length > 0) {
+      text += `\n*Abonos Recientes:*\n`
+      statementData.payments.forEach(pay => {
+        text += `• ${new Date(pay.created_at).toLocaleDateString('es-MX')}: -$${pay.amount.toFixed(2)} (${pay.payment_method})\n`
+      })
+    }
+
+    text += `\n¡Gracias por tu preferencia!`
+
+    return `https://wa.me/${statementCustomer.phone ? '521' + statementCustomer.phone : ''}?text=${encodeURIComponent(text)}`
+  }
+
+  // Crear Cliente
   const handleCreateCustomer = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!fullName.trim()) return
@@ -58,7 +134,7 @@ export default function CustomersPage() {
     }
   }
 
-  // Registrar abono
+  // Registrar Abono
   const handleRegisterPayment = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!selectedCustomer) return
@@ -72,7 +148,6 @@ export default function CustomersPage() {
     setProcessing(true)
 
     try {
-      // 1. Insertar abono en la tabla customer_payments
       const { error: payError } = await supabase.from('customer_payments').insert({
         customer_id: selectedCustomer.id,
         amount: amount,
@@ -82,7 +157,6 @@ export default function CustomersPage() {
 
       if (payError) throw payError
 
-      // 2. Restar deuda en la tabla customers
       const newBalance = Math.max(0, selectedCustomer.current_balance - amount)
       const { error: custError } = await supabase
         .from('customers')
@@ -91,7 +165,6 @@ export default function CustomersPage() {
 
       if (custError) throw custError
 
-      // 3. Registrar entrada en caja si fue en efectivo
       if (paymentMethod === 'EFECTIVO') {
         await supabase.from('cash_movements').insert({
           type: 'ABONO_EFECTIVO',
@@ -120,12 +193,10 @@ export default function CustomersPage() {
 
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6">
-      
-      {/* ENCABEZADO */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Control de Clientes y Fiados</h1>
-          <p className="text-sm text-gray-500">Administra cuentas corrientes, límites de crédito y abonos.</p>
+          <p className="text-sm text-gray-500">Administra cuentas corrientes, límites de crédito, desgloses y abonos.</p>
         </div>
 
         <button
@@ -137,7 +208,6 @@ export default function CustomersPage() {
         </button>
       </div>
 
-      {/* BARRA DE BÚSQUEDA */}
       <div className="relative">
         <Search className="absolute left-3 top-3 text-gray-400 w-5 h-5" />
         <input
@@ -145,15 +215,14 @@ export default function CustomersPage() {
           placeholder="Buscar por nombre o teléfono..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          className="w-full pl-10 pr-4 py-2.5 bg-white rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="w-full pl-10 pr-4 py-2.5 bg-white rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
         />
       </div>
 
-      {/* TABLA DE CLIENTES */}
       <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
         <table className="w-full text-left border-collapse">
           <thead>
-            <tr className="bg-gray-50 border-b border-gray-200 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+            <tr className="bg-gray-50 border-b border-gray-200 text-xs font-semibold text-gray-500 uppercase">
               <th className="p-4">Cliente</th>
               <th className="p-4">Teléfono</th>
               <th className="p-4">Deuda Actual</th>
@@ -177,13 +246,20 @@ export default function CustomersPage() {
                     </span>
                   </td>
                   <td className="p-4 text-gray-600">${c.credit_limit.toFixed(2)}</td>
-                  <td className="p-4 text-right">
+                  <td className="p-4 text-right space-x-1">
+                    <button
+                      onClick={() => openStatement(c)}
+                      className="py-1.5 px-2.5 bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-lg font-bold text-xs inline-flex items-center gap-1"
+                    >
+                      <FileText className="w-3.5 h-3.5" />
+                      Estado de Cuenta
+                    </button>
                     <button
                       onClick={() => setSelectedCustomer(c)}
-                      className="py-1.5 px-3 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded-lg font-bold text-xs inline-flex items-center gap-1"
+                      className="py-1.5 px-2.5 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded-lg font-bold text-xs inline-flex items-center gap-1"
                     >
                       <DollarSign className="w-3.5 h-3.5" />
-                      Registrar Abono
+                      Abonar
                     </button>
                   </td>
                 </tr>
@@ -192,6 +268,104 @@ export default function CustomersPage() {
           </tbody>
         </table>
       </div>
+
+      {/* MODAL: ESTADO DE CUENTA / HISTORIAL DE DEUDA */}
+      {statementCustomer && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4 max-h-[85vh] flex flex-col">
+            <div className="flex justify-between items-center border-b pb-3">
+              <div>
+                <h3 className="text-lg font-bold text-gray-900">Estado de Cuenta</h3>
+                <p className="text-xs text-gray-500">Cliente: <span className="font-bold text-gray-800">{statementCustomer.full_name}</span></p>
+              </div>
+              <button onClick={() => setStatementCustomer(null)} className="text-gray-400 hover:text-gray-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="bg-red-50 border border-red-200 p-3 rounded-xl flex justify-between items-center">
+              <span className="text-xs font-bold text-red-700">Deuda Pendiente Total:</span>
+              <span className="text-xl font-black text-red-700">${statementCustomer.current_balance.toFixed(2)}</span>
+            </div>
+
+            <div className="flex-1 overflow-y-auto space-y-4 pr-1">
+              {loadingStatement ? (
+                <p className="text-center text-xs text-gray-400 py-6">Cargando desglose de compras...</p>
+              ) : (
+                <>
+                  {/* COMPRAS FIADAS */}
+                  <div>
+                    <h4 className="text-xs font-bold text-gray-500 uppercase mb-2">Compras Fiadas</h4>
+                    {statementData.sales.length === 0 ? (
+                      <p className="text-xs text-gray-400 italic">Sin registros de compras a crédito.</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {statementData.sales.map(s => (
+                          <div key={s.id} className="p-3 bg-gray-50 border rounded-xl space-y-1.5 text-xs">
+                            <div className="flex justify-between font-bold text-gray-800">
+                              <span>Folio: {s.sale_code}</span>
+                              <span className="text-red-600">${s.total_amount.toFixed(2)}</span>
+                            </div>
+                            <p className="text-[10px] text-gray-400">{new Date(s.created_at).toLocaleString('es-MX')}</p>
+                            
+                            {/* Desglose de Productos */}
+                            <div className="border-t border-gray-200 pt-1 space-y-0.5">
+                              {s.sale_items?.map((item: any, idx: number) => (
+                                <div key={idx} className="flex justify-between text-gray-600 text-[11px]">
+                                  <span>{item.quantity}x {item.products?.name || 'Producto'}</span>
+                                  <span>${item.subtotal.toFixed(2)}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* ABONOS REALIZADOS */}
+                  <div>
+                    <h4 className="text-xs font-bold text-gray-500 uppercase mb-2">Abonos Realizados</h4>
+                    {statementData.payments.length === 0 ? (
+                      <p className="text-xs text-gray-400 italic">Sin abonos registrados.</p>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {statementData.payments.map(p => (
+                          <div key={p.id} className="p-2.5 bg-emerald-50 border border-emerald-100 rounded-xl flex justify-between items-center text-xs">
+                            <div>
+                              <span className="font-bold text-emerald-800">Abono ({p.payment_method})</span>
+                              <p className="text-[10px] text-gray-500">{new Date(p.created_at).toLocaleString('es-MX')}</p>
+                            </div>
+                            <span className="font-black text-emerald-700">-${p.amount.toFixed(2)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div className="pt-2 border-t flex gap-2">
+              <a
+                href={generateStatementWhatsApp()}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold flex items-center justify-center gap-2 text-xs"
+              >
+                <Share2 className="w-4 h-4" />
+                Enviar Estado por WhatsApp
+              </a>
+              <button
+                onClick={() => setStatementCustomer(null)}
+                className="py-2.5 px-4 bg-gray-100 text-gray-700 rounded-xl font-bold text-xs"
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* MODAL: NUEVO CLIENTE */}
       {showNewModal && (
@@ -328,7 +502,6 @@ export default function CustomersPage() {
           </div>
         </div>
       )}
-
     </div>
   )
 }
