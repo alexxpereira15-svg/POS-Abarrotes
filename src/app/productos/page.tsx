@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Product, Category } from '@/types'
-import { Plus, Search, Package, AlertTriangle, ArrowUpCircle, Tag } from 'lucide-react'
+import { Plus, Search, Package, AlertTriangle, ArrowUpCircle, Tag, Edit3 } from 'lucide-react'
 
 export default function ProductsPage() {
   const supabase = createClient()
@@ -16,8 +16,9 @@ export default function ProductsPage() {
   // Modales
   const [showNewModal, setShowNewModal] = useState(false)
   const [showCatModal, setShowCatModal] = useState(false)
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null)
 
-  // Formulario Producto
+  // Formulario Producto (Nuevo y Edición)
   const [categoryId, setCategoryId] = useState('')
   const [name, setName] = useState('')
   const [price, setPrice] = useState('')
@@ -70,11 +71,56 @@ export default function ProductsPage() {
       setCatPrefix('')
       setShowCatModal(false)
       await fetchData()
-      setCategoryId(data.id) // Autoseleccionar la recién creada
+      setCategoryId(data.id)
     }
   }
 
-  // Crear Producto
+  // Abrir Modal de Edición
+  const openEditModal = (p: Product) => {
+    setEditingProduct(p)
+    setCategoryId(p.category_id || '')
+    setName(p.name)
+    setPrice(p.price.toString())
+    setCostPrice((p.cost_price || 0).toString())
+    setStock(p.stock.toString())
+    setMinStock((p.min_stock || 5).toString())
+    setImageUrl(p.image_url || '')
+  }
+
+  // Guardar Edición de Producto
+  const handleUpdateProduct = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!editingProduct || !name.trim()) return
+
+    setSaving(true)
+
+    try {
+      const { error } = await supabase
+        .from('products')
+        .update({
+          category_id: categoryId || editingProduct.category_id,
+          name: name.trim(),
+          price: parseFloat(price) || 0,
+          cost_price: parseFloat(costPrice) || 0,
+          stock: parseInt(stock) || 0,
+          min_stock: parseInt(minStock) || 5,
+          image_url: imageUrl.trim() || null
+        })
+        .eq('id', editingProduct.id)
+
+      if (error) throw error
+
+      setEditingProduct(null)
+      fetchData()
+    } catch (err) {
+      console.error(err)
+      alert('Error al actualizar el producto.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // Crear Producto Nuevo
   const handleCreateProduct = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!name.trim() || !categoryId) {
@@ -160,7 +206,7 @@ export default function ProductsPage() {
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Catálogo e Inventario</h1>
-          <p className="text-sm text-gray-500">Maneja productos, entradas de mercancía y existencias.</p>
+          <p className="text-sm text-gray-500">Maneja productos, precios, costos y existencias.</p>
         </div>
 
         <div className="flex gap-2">
@@ -198,6 +244,7 @@ export default function ProductsPage() {
             <tr className="bg-gray-50 border-b border-gray-200 text-xs font-semibold text-gray-500 uppercase">
               <th className="p-4">Código</th>
               <th className="p-4">Producto</th>
+              <th className="p-4">Costo</th>
               <th className="p-4">Precio Venta</th>
               <th className="p-4">Stock Actual</th>
               <th className="p-4 text-right">Acciones</th>
@@ -205,9 +252,9 @@ export default function ProductsPage() {
           </thead>
           <tbody className="divide-y divide-gray-100 text-sm">
             {loading ? (
-              <tr><td colSpan={5} className="p-6 text-center text-gray-400">Cargando inventario...</td></tr>
+              <tr><td colSpan={6} className="p-6 text-center text-gray-400">Cargando inventario...</td></tr>
             ) : filteredProducts.length === 0 ? (
-              <tr><td colSpan={5} className="p-6 text-center text-gray-400">No hay productos en el catálogo.</td></tr>
+              <tr><td colSpan={6} className="p-6 text-center text-gray-400">No hay productos en el catálogo.</td></tr>
             ) : (
               filteredProducts.map(p => {
                 const isOutOfStock = p.stock <= 0
@@ -220,6 +267,7 @@ export default function ProductsPage() {
                       <Package className="w-4 h-4 text-gray-400" />
                       {p.name}
                     </td>
+                    <td className="p-4 text-gray-500">${(p.cost_price || 0).toFixed(2)}</td>
                     <td className="p-4 font-extrabold text-gray-900">${p.price.toFixed(2)}</td>
                     <td className="p-4">
                       {isOutOfStock ? (
@@ -232,13 +280,21 @@ export default function ProductsPage() {
                         <span className="font-semibold text-gray-700">{p.stock} unidades</span>
                       )}
                     </td>
-                    <td className="p-4 text-right">
+                    <td className="p-4 text-right space-x-1">
+                      <button
+                        onClick={() => openEditModal(p)}
+                        className="py-1.5 px-2.5 bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-lg font-bold text-xs inline-flex items-center gap-1"
+                        title="Editar Precios y Datos"
+                      >
+                        <Edit3 className="w-3.5 h-3.5" />
+                        Editar
+                      </button>
                       <button
                         onClick={() => setSelectedProduct(p)}
-                        className="py-1.5 px-3 bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-lg font-bold text-xs inline-flex items-center gap-1"
+                        className="py-1.5 px-2.5 bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-lg font-bold text-xs inline-flex items-center gap-1"
                       >
                         <ArrowUpCircle className="w-3.5 h-3.5" />
-                        Surtir Stock
+                        Surtir
                       </button>
                     </td>
                   </tr>
@@ -248,6 +304,101 @@ export default function ProductsPage() {
           </tbody>
         </table>
       </div>
+
+      {/* MODAL: EDITAR PRODUCTO */}
+      {editingProduct && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl space-y-4">
+            <h3 className="text-lg font-bold text-gray-900">Editar Producto: <span className="font-mono text-blue-600">{editingProduct.sku_code}</span></h3>
+
+            <form onSubmit={handleUpdateProduct} className="space-y-3">
+              <div>
+                <label className="text-xs font-semibold text-gray-600">Nombre del Producto *</label>
+                <input
+                  type="text"
+                  required
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  className="w-full mt-1 p-2 bg-gray-50 border rounded-lg text-sm font-bold"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-xs font-semibold text-gray-600">Costo Compra ($)</label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    value={costPrice}
+                    onChange={(e) => setCostPrice(e.target.value)}
+                    className="w-full mt-1 p-2 bg-gray-50 border rounded-lg text-sm font-bold text-gray-700"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-gray-600">Precio Venta ($) *</label>
+                  <input
+                    type="number"
+                    required
+                    step="0.5"
+                    value={price}
+                    onChange={(e) => setPrice(e.target.value)}
+                    className="w-full mt-1 p-2 bg-gray-50 border rounded-lg text-sm font-bold text-blue-700"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-xs font-semibold text-gray-600">Stock Actual</label>
+                  <input
+                    type="number"
+                    required
+                    value={stock}
+                    onChange={(e) => setStock(e.target.value)}
+                    className="w-full mt-1 p-2 bg-gray-50 border rounded-lg text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-gray-600">Stock Mínimo (Alerta)</label>
+                  <input
+                    type="number"
+                    value={minStock}
+                    onChange={(e) => setMinStock(e.target.value)}
+                    className="w-full mt-1 p-2 bg-gray-50 border rounded-lg text-sm"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-gray-600">URL Imagen (Opcional)</label>
+                <input
+                  type="url"
+                  value={imageUrl}
+                  onChange={(e) => setImageUrl(e.target.value)}
+                  className="w-full mt-1 p-2 bg-gray-50 border rounded-lg text-sm"
+                />
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingProduct(null)}
+                  className="flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-lg text-xs font-bold"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="flex-1 py-2.5 bg-blue-600 text-white rounded-lg text-xs font-bold"
+                >
+                  {saving ? 'Guardando...' : 'Actualizar Cambios'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* MODAL: NUEVA CATEGORÍA */}
       {showCatModal && (
@@ -267,7 +418,7 @@ export default function ProductsPage() {
                 />
               </div>
               <div>
-                <label className="text-xs font-semibold text-gray-600">Prefijo para Código (3-4 Letras) *</label>
+                <label className="text-xs font-semibold text-gray-600">Prefijo (3-4 Letras) *</label>
                 <input
                   type="text"
                   required
@@ -327,11 +478,6 @@ export default function ProductsPage() {
                     <option key={c.id} value={c.id}>{c.name} ({c.code_prefix})</option>
                   ))}
                 </select>
-                {categories.length === 0 && (
-                  <p className="text-[11px] text-amber-600 mt-1">
-                    No hay categorías aún. Haz clic arriba en "+ Crear Categoría".
-                  </p>
-                )}
               </div>
 
               <div>
