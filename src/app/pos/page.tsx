@@ -125,7 +125,7 @@ export default function POSPage() {
         product_id: item.id,
         quantity: item.quantity,
         unit_price: item.price,
-        unit_cost: item.cost_price || 0, // Congelar costo histórico
+        unit_cost: item.cost_price || 0,
         subtotal: item.price * item.quantity
       }))
 
@@ -139,11 +139,20 @@ export default function POSPage() {
           .eq('id', item.id)
       }
 
+      // REGISTRO DE MOVIMIENTO DE CAJA SEGÚN MÉTODO DE PAGO
       if (paymentMethod === 'EFECTIVO') {
         await supabase.from('cash_movements').insert({
           type: 'VENTA_EFECTIVO',
+          account_type: 'EFECTIVO',
           amount: totalCart,
           concept: `Venta en efectivo ${saleCode}`
+        })
+      } else if (paymentMethod === 'TRANSFERENCIA') {
+        await supabase.from('cash_movements').insert({
+          type: 'VENTA_EFECTIVO',
+          account_type: 'BANCO',
+          amount: totalCart,
+          concept: `Venta por transferencia ${saleCode}`
         })
       }
 
