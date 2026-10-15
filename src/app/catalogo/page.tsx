@@ -3,14 +3,14 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Product, Category } from '@/types'
-import { Search, ShoppingBag, Plus, Minus, Trash2, Send, CheckCircle2, Store } from 'lucide-react'
+import { Search, ShoppingBag, Plus, Minus, Trash2, Send, Store, Lightbulb } from 'lucide-react'
 
 interface CartItem extends Product {
   quantity: number
 }
 
-// ⚠️ CAMBIA ESTE NÚMERO POR TU NÚMERO DE WHATSAPP (Con clave de país, ej. 529991234567)
-const WHATSAPP_NUMBER = '529993557616'
+// ⚠️ NÚMERO DE WHATSAPP PARA RECIBIR PEDIDOS Y SUGERENCIAS
+const WHATSAPP_NUMBER = '529991234567'
 
 export default function CatalogPage() {
   const supabase = createClient()
@@ -25,10 +25,12 @@ export default function CatalogPage() {
   const [customerName, setCustomerName] = useState('')
   const [deliveryAddress, setDeliveryAddress] = useState('')
 
+  // Estado para la sugerencia de productos
+  const [productSuggestion, setProductSuggestion] = useState('')
+
   const fetchData = async () => {
     setLoading(true)
     const { data: catData } = await supabase.from('categories').select('*')
-    // Traemos solo productos activos
     const { data: prodData } = await supabase.from('products').select('*').eq('is_active', true)
 
     if (catData) setCategories(catData)
@@ -82,7 +84,7 @@ export default function CatalogPage() {
   const totalCart = cart.reduce((acc, item) => acc + (item.price * item.quantity), 0)
   const totalItems = cart.reduce((acc, item) => acc + item.quantity, 0)
 
-  // Armar enlace de WhatsApp con el pedido
+  // Enviar pedido por WhatsApp
   const handleSendWhatsAppOrder = (e: React.FormEvent) => {
     e.preventDefault()
     if (cart.length === 0) return
@@ -98,15 +100,27 @@ export default function CatalogPage() {
 
     text += `-----------------------------------\n`
     text += `💰 *Total Estimado: $${totalCart.toFixed(2)}*\n\n`
+    text += `¿Me confirmas disponibilidad para pasar / entregar?`
 
     const url = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(text)}`
     window.open(url, '_blank')
   }
 
+  // Enviar sugerencia de producto por WhatsApp
+  const handleSendSuggestion = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!productSuggestion.trim()) return
+
+    const text = `*¡Hola! Quisiera sugerir que surtan el siguiente producto en Abarrotes el niño:*\n\n💡 *Sugerencia:* ${productSuggestion.trim()}`
+    const url = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(text)}`
+    window.open(url, '_blank')
+    setProductSuggestion('')
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 font-sans pb-24">
       
-      {/* ENCABEZADO PÚBLICO DE LA TIENDITA */}
+      {/* ENCABEZADO PÚBLICO */}
       <header className="bg-blue-700 text-white sticky top-0 z-30 shadow-md">
         <div className="max-w-3xl mx-auto p-4 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
@@ -114,7 +128,7 @@ export default function CatalogPage() {
               <Store className="w-6 h-6 text-white" />
             </div>
             <div>
-              <h1 className="font-extrabold text-base leading-tight"> Abarrotes el niño </h1>
+              <h1 className="font-extrabold text-base leading-tight">Abarrotes el niño</h1>
               <p className="text-[11px] text-blue-200">Catálogo Digital de Productos</p>
             </div>
           </div>
@@ -134,7 +148,7 @@ export default function CatalogPage() {
         </div>
       </header>
 
-      <main className="max-w-3xl mx-auto p-4 space-y-4">
+      <main className="max-w-3xl mx-auto p-4 space-y-6">
         
         {/* BUSCADOR */}
         <div className="relative">
@@ -234,6 +248,37 @@ export default function CatalogPage() {
           )}
         </div>
 
+        {/* SECCIÓN HASTA ABAJO: SUGERIR PRODUCTOS */}
+        <section className="bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200 rounded-3xl p-5 shadow-sm space-y-3">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 bg-amber-500 text-white rounded-2xl shadow-sm">
+              <Lightbulb className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="font-extrabold text-gray-900 text-sm">¿No encontraste lo que buscabas?</h2>
+              <p className="text-xs text-gray-600">¡Ayúdanos a mejorar! Sugiérenos qué producto te gustaría que surtamos.</p>
+            </div>
+          </div>
+
+          <form onSubmit={handleSendSuggestion} className="space-y-2">
+            <textarea
+              required
+              rows={2}
+              placeholder="Ej. Cheetos Paminas grandes, Galletas Emperador de Limón, Coca-Cola Sin Azúcar de 600ml..."
+              value={productSuggestion}
+              onChange={(e) => setProductSuggestion(e.target.value)}
+              className="w-full p-3 bg-white border border-amber-200 rounded-2xl text-xs focus:ring-2 focus:ring-amber-500 focus:outline-none resize-none shadow-inner"
+            />
+            <button
+              type="submit"
+              className="w-full py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl shadow-md flex items-center justify-center gap-2 text-xs transition-all active:scale-[0.98]"
+            >
+              <Send className="w-3.5 h-3.5" />
+              Enviar Sugerencia por WhatsApp
+            </button>
+          </form>
+        </section>
+
       </main>
 
       {/* BARRA INFERIOR FLOTANTE DE PEDIDO */}
@@ -299,7 +344,7 @@ export default function CatalogPage() {
 
             <form onSubmit={handleSendWhatsAppOrder} className="pt-2 border-t border-gray-100 space-y-2.5">
               <div>
-                <label className="text-[11px] font-bold text-gray-700 block mb-0.5">Tu Nombre:</label>
+                <label className="text-[11px] font-bold text-gray-700 block mb-0.5">Tu Nombre (Opcional):</label>
                 <input
                   type="text"
                   placeholder="Ej. María López"
