@@ -46,7 +46,7 @@ export default function Navbar() {
             </div>
             <div>
               <span className="font-extrabold text-base text-gray-900 tracking-tight block leading-none">
-                Abarrotes POS
+                Abarrotes El niño
               </span>
               <span className="text-[10px] text-gray-400 font-semibold tracking-wide uppercase">
                 Panel Admin
