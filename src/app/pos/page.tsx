@@ -2,8 +2,8 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { Product, Category } from '@/types'
-import { Search, ShoppingCart, Trash2, Plus, Minus, DollarSign } from 'lucide-react'
+import { Product, Category, Customer, PaymentMethod } from '@/types'
+import { Search, ShoppingCart, Trash2, Plus, Minus, DollarSign, X, CheckCircle, Share2, CreditCard, User, AlertTriangle } from 'lucide-react'
 
 interface CartItem extends Product {
   quantity: number
@@ -15,22 +15,34 @@ export default function POSPage() {
   // Estados de datos
   const [products, setProducts] = useState<Product[]>([])
   const [categories, setCategories] = useState<Category[]>([])
+  const [customers, setCustomers] = useState<Customer[]>([])
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [cart, setCart] = useState<CartItem[]>([])
   const [loading, setLoading] = useState(true)
 
-  // Cargar datos desde Supabase
-  useEffect(() => {
-    async function fetchData() {
-      setLoading(true)
-      const { data: catData } = await supabase.from('categories').select('*')
-      const { data: prodData } = await supabase.from('products').select('*').eq('is_active', true)
+  // Estados del Modal de Cobro
+  const [isCheckoutOpen, setIsCheckoutOpen] = useState(false)
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('EFECTIVO')
+  const [amountPaid, setAmountPaid] = useState<string>('')
+  const [selectedCustomer, setSelectedCustomer] = useState<string>('')
+  const [processing, setProcessing] = useState(false)
+  const [completedSale, setCompletedSale] = useState<any | null>(null)
 
-      if (catData) setCategories(catData)
-      if (prodData) setProducts(prodData)
-      setLoading(false)
-    }
+  // Cargar datos desde Supabase
+  const fetchData = async () => {
+    setLoading(true)
+    const { data: catData } = await supabase.from('categories').select('*')
+    const { data: prodData } = await supabase.from('products').select('*').eq('is_active', true)
+    const { data: custData } = await supabase.from('customers').select('*')
+
+    if (catData) setCategories(catData)
+    if (prodData) setProducts(prodData)
+    if (custData) setCustomers(custData)
+    setLoading(false)
+  }
+
+  useEffect(() => {
     fetchData()
   }, [])
 
@@ -77,6 +89,128 @@ export default function POSPage() {
   }
 
   const totalCart = cart.reduce((acc, item) => acc + (item.price * item.quantity), 0)
+  const changeDue = Math.max(0, (parseFloat(amountPaid) || 0) - totalCart)
+
+  // Datos del cliente seleccionado para validación de crédito
+  const activeCustomer = customers.find(c => c.id === selectedCustomer)
+  const isCreditExceeded = paymentMethod === 'CREDITO' && activeCustomer && 
+    (activeCustomer.current_balance + totalCart > activeCustomer.credit_limit)
+
+  // Procesar Venta en Supabase
+  const handleProcessSale = async () => {
+    if (cart.length === 0 || processing) return
+    if (paymentMethod === 'CREDITO' && !selectedCustomer) {
+      alert('Por favor selecciona un cliente para fiar la compra.')
+      return
+    }
+    if (paymentMethod === 'CREDITO' && isCreditExceeded) {
+      alert('El monto excede el límite de crédito del cliente.')
+      return
+    }
+
+    setProcessing(true)
+
+    try {
+      const saleCode = `VTA-${Math.floor(100000 + Math.random() * 900000)}`
+      
+      // 1. Insertar Encabezado de Venta
+      const { data: saleData, error: saleError } = await supabase
+        .from('sales')
+        .insert({
+          sale_code: saleCode,
+          customer_id: selectedCustomer || null,
+          payment_type: paymentMethod,
+          total_amount: totalCart,
+          status: paymentMethod === 'CREDITO' ? 'PENDIENTE_PAGO' : 'PAGADA'
+        })
+        .select()
+        .single()
+
+      if (saleError) throw saleError
+
+      // 2. Insertar Detalle de Venta
+      const saleItems = cart.map(item => ({
+        sale_id: saleData.id,
+        product_id: item.id,
+        quantity: item.quantity,
+        unit_price: item.price,
+        subtotal: item.price * item.quantity
+      }))
+
+      const { error: itemsError } = await supabase.from('sale_items').insert(saleItems)
+      if (itemsError) throw itemsError
+
+      // 3. Actualizar Stock de Productos
+      for (const item of cart) {
+        await supabase
+          .from('products')
+          .update({ stock: item.stock - item.quantity })
+          .eq('id', item.id)
+      }
+
+      // 4. Si fue en Efectivo, registrar movimiento de caja
+      if (paymentMethod === 'EFECTIVO') {
+        await supabase.from('cash_movements').insert({
+          type: 'VENTA_EFECTIVO',
+          amount: totalCart,
+          concept: `Venta en efectivo ${saleCode}`
+        })
+      }
+
+      // 5. Si fue Fiado, actualizar saldo del cliente
+      if (paymentMethod === 'CREDITO' && activeCustomer) {
+        await supabase
+          .from('customers')
+          .update({ current_balance: activeCustomer.current_balance + totalCart })
+          .eq('id', activeCustomer.id)
+      }
+
+      setCompletedSale({
+        code: saleCode,
+        total: totalCart,
+        cart: [...cart],
+        paymentMethod,
+        customerName: activeCustomer?.full_name
+      })
+
+      // Recargar catálogo y limpiar carrito
+      fetchData()
+      setCart([])
+    } catch (error) {
+      console.error('Error al procesar la venta:', error)
+      alert('Ocurrió un error al guardar la venta.')
+    } finally {
+      setProcessing(false)
+    }
+  }
+
+  // Generar mensaje para WhatsApp
+  const generateWhatsAppLink = () => {
+    if (!completedSale) return ''
+    let text = `*Ticket de Compra - La Tiendita*\n`
+    text += `Folio: ${completedSale.code}\n`
+    text += `--------------------------------\n`
+    completedSale.cart.forEach((item: CartItem) => {
+      text += `${item.quantity}x ${item.name} - $${(item.price * item.quantity).toFixed(2)}\n`
+    })
+    text += `--------------------------------\n`
+    text += `*Total: $${completedSale.total.toFixed(2)}*\n`
+    text += `Método de Pago: ${completedSale.paymentMethod}\n`
+    if (completedSale.customerName) {
+      text += `Cliente: ${completedSale.customerName}\n`
+    }
+    text += `\n¡Gracias por tu compra!`
+
+    return `https://wa.me/?text=${encodeURIComponent(text)}`
+  }
+
+  const resetCheckout = () => {
+    setIsCheckoutOpen(false)
+    setCompletedSale(null)
+    setAmountPaid('')
+    setSelectedCustomer('')
+    setPaymentMethod('EFECTIVO')
+  }
 
   return (
     <div className="flex h-screen bg-gray-100 font-sans">
@@ -84,7 +218,7 @@ export default function POSPage() {
       {/* SECCIÓN IZQUIERDA: CATÁLOGO DE PRODUCTOS (GRID + BUSCADOR) */}
       <div className="flex-1 flex flex-col p-4 overflow-hidden">
         
-        {/* Barra de Búsqueda y Filtros */}
+        {/* Barra de Búsqueda */}
         <div className="flex flex-col md:flex-row gap-3 mb-4">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-3 text-gray-400 w-5 h-5" />
@@ -143,7 +277,6 @@ export default function POSPage() {
                   }`}
                 >
                   <div>
-                    {/* Badge de Código y Stock */}
                     <div className="flex justify-between items-center mb-2">
                       <span className="text-xs font-mono font-semibold text-gray-500 bg-gray-100 px-2 py-0.5 rounded">
                         {product.sku_code}
@@ -159,7 +292,6 @@ export default function POSPage() {
                       )}
                     </div>
 
-                    {/* Imagen o Placeholder */}
                     <div className="h-24 w-full bg-gray-50 rounded-lg mb-2 flex items-center justify-center overflow-hidden">
                       {product.image_url ? (
                         <img src={product.image_url} alt={product.name} className="h-full object-contain" />
@@ -191,9 +323,8 @@ export default function POSPage() {
         </div>
       </div>
 
-      {/* SECCIÓN DERECHA: CARRITO Y COBRO */}
+      {/* SECCIÓN DERECHA: CARRITO Y BOTÓN DE COBRO */}
       <div className="w-96 bg-white border-l border-gray-200 flex flex-col h-full shadow-lg">
-        
         <div className="p-4 border-b border-gray-200 flex items-center justify-between bg-gray-50">
           <div className="flex items-center gap-2">
             <ShoppingCart className="w-5 h-5 text-blue-600" />
@@ -204,7 +335,7 @@ export default function POSPage() {
           </span>
         </div>
 
-        {/* Lista de Items en el Carrito */}
+        {/* Lista de Items */}
         <div className="flex-1 overflow-y-auto p-4 divide-y divide-gray-100">
           {cart.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-gray-400 space-y-2">
@@ -219,19 +350,12 @@ export default function POSPage() {
                   <span className="text-xs text-gray-500">${item.price.toFixed(2)} c/u</span>
                 </div>
 
-                {/* Controles de Cantidad */}
                 <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
-                  <button
-                    onClick={() => updateQuantity(item.id, -1)}
-                    className="p-1 hover:bg-white rounded text-gray-600 transition-colors"
-                  >
+                  <button onClick={() => updateQuantity(item.id, -1)} className="p-1 hover:bg-white rounded text-gray-600">
                     <Minus className="w-3 h-3" />
                   </button>
                   <span className="text-xs font-bold px-2">{item.quantity}</span>
-                  <button
-                    onClick={() => updateQuantity(item.id, 1)}
-                    className="p-1 hover:bg-white rounded text-gray-600 transition-colors"
-                  >
+                  <button onClick={() => updateQuantity(item.id, 1)} className="p-1 hover:bg-white rounded text-gray-600">
                     <Plus className="w-3 h-3" />
                   </button>
                 </div>
@@ -240,10 +364,7 @@ export default function POSPage() {
                   <span className="text-sm font-bold text-gray-900">${(item.price * item.quantity).toFixed(2)}</span>
                 </div>
 
-                <button
-                  onClick={() => removeFromCart(item.id)}
-                  className="text-gray-400 hover:text-red-500 p-1 transition-colors"
-                >
+                <button onClick={() => removeFromCart(item.id)} className="text-gray-400 hover:text-red-500 p-1">
                   <Trash2 className="w-4 h-4" />
                 </button>
               </div>
@@ -251,7 +372,7 @@ export default function POSPage() {
           )}
         </div>
 
-        {/* Resumen y Botón de Cobro */}
+        {/* Resumen y Botón de Abrir Cobro */}
         <div className="p-4 border-t border-gray-200 bg-gray-50 space-y-3">
           <div className="flex justify-between items-center text-xl font-extrabold text-gray-900">
             <span>Total:</span>
@@ -260,18 +381,168 @@ export default function POSPage() {
 
           <button
             disabled={cart.length === 0}
+            onClick={() => setIsCheckoutOpen(true)}
             className={`w-full py-3 px-4 rounded-xl font-bold text-white shadow-md flex items-center justify-center gap-2 transition-all ${
-              cart.length === 0
-                ? 'bg-gray-300 cursor-not-allowed'
-                : 'bg-green-600 hover:bg-green-700 active:scale-[0.98]'
+              cart.length === 0 ? 'bg-gray-300 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700 active:scale-[0.98]'
             }`}
           >
             <DollarSign className="w-5 h-5" />
             Cobrar (${totalCart.toFixed(2)})
           </button>
         </div>
-
       </div>
+
+      {/* MODAL DE COBRO Y PAGO */}
+      {isCheckoutOpen && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl relative overflow-hidden">
+            
+            {completedSale ? (
+              /* PANTALLA DE ÉXITO Y TICKET */
+              <div className="text-center space-y-4 py-4">
+                <CheckCircle className="w-16 h-16 text-green-500 mx-auto" />
+                <h3 className="text-2xl font-extrabold text-gray-900">¡Venta Exitosa!</h3>
+                <p className="text-sm text-gray-500">Folio de venta: <span className="font-mono font-bold">{completedSale.code}</span></p>
+                <div className="bg-gray-50 p-4 rounded-xl text-left border border-gray-200 space-y-1 text-sm">
+                  <p className="flex justify-between font-bold text-gray-800">
+                    <span>Total Cobrado:</span>
+                    <span>${completedSale.total.toFixed(2)}</span>
+                  </p>
+                  <p className="text-xs text-gray-500">Método: {completedSale.paymentMethod}</p>
+                </div>
+
+                <div className="flex gap-2">
+                  <a
+                    href={generateWhatsAppLink()}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex-1 py-3 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold flex items-center justify-center gap-2 text-sm"
+                  >
+                    <Share2 className="w-4 h-4" />
+                    Enviar Ticket por WhatsApp
+                  </a>
+                  <button
+                    onClick={resetCheckout}
+                    className="py-3 px-4 bg-gray-800 hover:bg-gray-900 text-white rounded-xl font-bold text-sm"
+                  >
+                    Nueva Venta
+                  </button>
+                </div>
+              </div>
+            ) : (
+              /* FORMULARIO DE PAGO */
+              <div>
+                <div className="flex justify-between items-center pb-3 border-b mb-4">
+                  <h3 className="text-lg font-bold text-gray-900">Procesar Pago</h3>
+                  <button onClick={resetCheckout} className="text-gray-400 hover:text-gray-600">
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <div className="text-center bg-blue-50 py-3 rounded-xl mb-4">
+                  <span className="text-xs text-blue-600 font-semibold uppercase">Monto Total</span>
+                  <p className="text-3xl font-black text-blue-900">${totalCart.toFixed(2)}</p>
+                </div>
+
+                {/* Selección de Método de Pago */}
+                <div className="grid grid-cols-3 gap-2 mb-4">
+                  <button
+                    onClick={() => setPaymentMethod('EFECTIVO')}
+                    className={`py-2 px-3 rounded-xl border text-xs font-bold flex flex-col items-center gap-1 ${
+                      paymentMethod === 'EFECTIVO' ? 'border-blue-600 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-600'
+                    }`}
+                  >
+                    <DollarSign className="w-4 h-4" />
+                    Efectivo
+                  </button>
+                  <button
+                    onClick={() => setPaymentMethod('TRANSFERENCIA')}
+                    className={`py-2 px-3 rounded-xl border text-xs font-bold flex flex-col items-center gap-1 ${
+                      paymentMethod === 'TRANSFERENCIA' ? 'border-blue-600 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-600'
+                    }`}
+                  >
+                    <CreditCard className="w-4 h-4" />
+                    Transferencia
+                  </button>
+                  <button
+                    onClick={() => setPaymentMethod('CREDITO')}
+                    className={`py-2 px-3 rounded-xl border text-xs font-bold flex flex-col items-center gap-1 ${
+                      paymentMethod === 'CREDITO' ? 'border-blue-600 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-600'
+                    }`}
+                  >
+                    <User className="w-4 h-4" />
+                    Fiado / Crédito
+                  </button>
+                </div>
+
+                {/* Vista según Método seleccionado */}
+                {paymentMethod === 'EFECTIVO' && (
+                  <div className="space-y-3 mb-4">
+                    <div>
+                      <label className="text-xs font-semibold text-gray-600">Paga con ($):</label>
+                      <input
+                        type="number"
+                        placeholder="Ej. 100"
+                        value={amountPaid}
+                        onChange={(e) => setAmountPaid(e.target.value)}
+                        className="w-full mt-1 p-2.5 bg-gray-50 border rounded-lg font-bold text-gray-800 text-lg focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                    {parseFloat(amountPaid) > 0 && (
+                      <div className="flex justify-between items-center p-3 bg-gray-100 rounded-lg text-sm font-bold">
+                        <span>Cambio a devolver:</span>
+                        <span className={changeDue >= 0 ? 'text-green-600 font-extrabold text-base' : 'text-red-500'}>
+                          ${changeDue.toFixed(2)}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {paymentMethod === 'CREDITO' && (
+                  <div className="space-y-3 mb-4">
+                    <div>
+                      <label className="text-xs font-semibold text-gray-600">Seleccionar Cliente:</label>
+                      <select
+                        value={selectedCustomer}
+                        onChange={(e) => setSelectedCustomer(e.target.value)}
+                        className="w-full mt-1 p-2.5 bg-gray-50 border rounded-lg font-medium text-gray-800 text-sm focus:ring-2 focus:ring-blue-500"
+                      >
+                        <option value="">-- Elige un cliente --</option>
+                        {customers.map(c => (
+                          <option key={c.id} value={c.id}>
+                            {c.full_name} (Deuda actual: ${c.current_balance.toFixed(2)} / Límite: ${c.credit_limit.toFixed(2)})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {isCreditExceeded && (
+                      <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg font-medium">
+                        <AlertTriangle className="w-4 h-4 shrink-0" />
+                        <span>¡Atención! La compra supera el límite de crédito disponible de este cliente.</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <button
+                  disabled={processing || (paymentMethod === 'EFECTIVO' && parseFloat(amountPaid) < totalCart) || isCreditExceeded}
+                  onClick={handleProcessSale}
+                  className={`w-full py-3.5 rounded-xl font-bold text-white shadow-md transition-all ${
+                    processing || (paymentMethod === 'EFECTIVO' && parseFloat(amountPaid) < totalCart) || isCreditExceeded
+                      ? 'bg-gray-300 cursor-not-allowed'
+                      : 'bg-green-600 hover:bg-green-700 active:scale-[0.98]'
+                  }`}
+                >
+                  {processing ? 'Guardando Venta...' : 'Confirmar Venta'}
+                </button>
+              </div>
+            )}
+
+          </div>
+        </div>
+      )}
 
     </div>
   )
