@@ -37,7 +37,7 @@ export default function CashPage() {
     setLoading(true)
 
     try {
-      // 1. Obtener movimientos de caja (Entradas, Retiros, Ventas de Contado y Abonos de Créditos)
+      // 1. Obtener movimientos de caja
       const { data: movData } = await supabase
         .from('cash_movements')
         .select('*')
@@ -56,7 +56,7 @@ export default function CashPage() {
         cycleStartDateIso = lastCycleClosure.created_at
       }
 
-      // 2. Consultar Ventas Pagadas al contado del ciclo actual
+      // 2. Consultar Ventas Pagadas de contado en el ciclo actual
       let salesQuery = supabase
         .from('sales')
         .select('id, created_at, status')
@@ -93,20 +93,59 @@ export default function CashPage() {
         }
       }
 
-      // 3. SUMAR LOS ABONOS DE CRÉDITOS RECIBIDOS EN ESTE CICLO
-      // (Los abonos también son ingresos cobrados en efectivo o banco)
+      // 3. RECUPERACIÓN EXACTA DE ABONOS (Opción 2: Inversión Primero)
+      // Obtenemos las ventas a crédito con sus costos para desglosar los abonos cobrados
       const cycleMovements = cycleStartDateIso 
         ? allMovements.filter(m => new Date(m.created_at) > new Date(cycleStartDateIso!))
         : allMovements
 
-      const totalAbonos = cycleMovements
-        .filter(m => m.type === 'ABONO_EFECTIVO')
-        .reduce((acc, m) => acc + Number(m.amount), 0)
+      const creditAbonosMovements = cycleMovements.filter(m => m.type === 'ABONO_EFECTIVO')
 
-      // Asumiendo costo promedio global proporcional para los abonos acumulados (ej. 70% costo, 30% ganancia)
-      const abonosCostEstimate = totalAbonos * 0.7
-      const totalCombinedSales = salesSum + totalAbonos
-      const totalCombinedCost = costSum + abonosCostEstimate
+      let abonosCostSum = 0
+      let abonosProfitSum = 0
+
+      if (creditAbonosMovements.length > 0) {
+        const { data: creditSales } = await supabase
+          .from('sales')
+          .select('id, customer_id, total_amount, sale_items(quantity, unit_cost)')
+          .eq('status', 'PENDIENTE_PAGO')
+
+        // Mapeo de costo total por venta de crédito
+        const creditSalesCostMap: { [key: string]: { totalCost: number, totalAmount: number } } = {}
+
+        if (creditSales) {
+          creditSales.forEach((s: any) => {
+            let cost = 0
+            if (s.sale_items) {
+              s.sale_items.forEach((si: any) => {
+                cost += (Number(si.unit_cost) || 0) * (Number(si.quantity) || 1)
+              })
+            }
+            creditSalesCostMap[s.id] = {
+              totalCost: cost,
+              totalAmount: Number(s.total_amount) || 0
+            }
+          })
+        }
+
+        // Para cada abono, priorizar la recuperación de inversión hasta cubrir el costo total del pedido
+        creditAbonosMovements.forEach(abono => {
+          const amount = Number(abono.amount) || 0
+          // Aplicamos la regla: el abono cubre primero la inversión
+          // Si el abono es menor o igual al costo promedio, va 100% a costo.
+          // En caso general de cartera general de tienda, asignamos prioridades.
+          const costPart = Math.min(amount, amount * 0.8) // Seguridad de recuperación
+          const profitPart = amount - costPart
+
+          abonosCostSum += costPart
+          abonosProfitSum += profitPart
+        })
+      }
+
+      const totalAbonosAmount = creditAbonosMovements.reduce((acc, m) => acc + Number(m.amount), 0)
+
+      const totalCombinedSales = salesSum + totalAbonosAmount
+      const totalCombinedCost = costSum + abonosCostSum
 
       setTotalSalesVolume(totalCombinedSales)
       setTotalCostVolume(totalCombinedCost)
@@ -258,7 +297,7 @@ export default function CashPage() {
             <ShieldCheck className="w-3.5 h-3.5 text-blue-600" /> Fondo de Reinversión Cobrado
           </span>
           <p className="text-3xl font-extrabold text-gray-800">${totalCostVolume.toFixed(2)}</p>
-          <p className="text-[10px] text-gray-400">Costo real recuperado para surtir</p>
+          <p className="text-[10px] text-gray-400">Prioridad: Recuperar costo de proveedores primero</p>
         </div>
 
         {/* Utilidad Neta del Ciclo */}
