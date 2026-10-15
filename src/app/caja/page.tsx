@@ -39,7 +39,7 @@ export default function CashPage() {
     setLoading(true)
 
     try {
-      // 1. Obtener todos los movimientos
+      // 1. Obtener todos los movimientos de caja
       const { data: movData } = await supabase
         .from('cash_movements')
         .select('*')
@@ -48,52 +48,93 @@ export default function CashPage() {
       const allMovements = movData || []
       setMovements(allMovements)
 
-      // Determinar la fecha de inicio según el filtro seleccionado
-      let startDate: Date | null = null
+      // 2. Determinar la fecha filtro
+      let startDateIso: string | null = null
 
       if (periodFilter === 'HOY') {
-        startDate = new Date()
-        startDate.setHours(0, 0, 0, 0)
+        const today = new Date()
+        today.setHours(0, 0, 0, 0)
+        startDateIso = today.toISOString()
       } else if (periodFilter === 'ESTE_MES') {
-        startDate = new Date()
-        startDate.setDate(1)
-        startDate.setHours(0, 0, 0, 0)
+        const firstDay = new Date()
+        firstDay.setDate(1)
+        firstDay.setHours(0, 0, 0, 0)
+        startDateIso = firstDay.toISOString()
       } else if (periodFilter === 'DESDE_ULTIMO_RETIRO') {
-        // Encontrar el último retiro registrado como Cierre/Ganancias
         const lastWithdrawal = allMovements.find(m => 
           m.type === 'RETIRO_EFECTIVO' && 
           (m.concept.includes('Cierre') || m.concept.includes('Ganancias'))
         )
         if (lastWithdrawal) {
-          startDate = new Date(lastWithdrawal.created_at)
+          startDateIso = lastWithdrawal.created_at
         }
       }
 
-      // 2. Consultar Ventas filtrando por la fecha calculada
-      let query = supabase.from('sale_items').select('quantity, subtotal, unit_price, unit_cost, created_at')
-      if (startDate) {
-        query = query.gte('created_at', startDate.toISOString())
+      // 3. Consultar las ventas filtrando por la tabla de ventas (sales)
+      let salesQuery = supabase.from('sales').select('id, created_at')
+      if (startDateIso && periodFilter !== 'HISTORICO') {
+        salesQuery = salesQuery.gte('created_at', startDateIso)
       }
 
-      const { data: itemsData } = await query
+      const { data: salesData } = await salesQuery
 
-      if (itemsData) {
-        let salesSum = 0
-        let costSum = 0
+      if (salesData && salesData.length > 0) {
+        const saleIds = salesData.map(s => s.id)
 
-        itemsData.forEach((item: any) => {
-          const subtotal = Number(item.subtotal) || 0
-          const frozenCostUnit = item.unit_cost !== null && item.unit_cost !== undefined ? Number(item.unit_cost) : 0
-          const itemCost = frozenCostUnit * (Number(item.quantity) || 1)
+        // Traer los items pertenecientes a esas ventas filtradas
+        const { data: itemsData } = await supabase
+          .from('sale_items')
+          .select('quantity, subtotal, unit_price, unit_cost')
+          .in('sale_id', saleIds)
 
-          salesSum += subtotal
-          costSum += itemCost
-        })
+        if (itemsData) {
+          let salesSum = 0
+          let costSum = 0
 
-        setTotalSalesVolume(salesSum)
-        setTotalCostVolume(costSum)
-        setTotalProfit(salesSum - costSum)
-        setTotalSalesCount(itemsData.length)
+          itemsData.forEach((item: any) => {
+            const subtotal = Number(item.subtotal) || 0
+            const frozenCostUnit = item.unit_cost !== null && item.unit_cost !== undefined ? Number(item.unit_cost) : 0
+            const itemCost = frozenCostUnit * (Number(item.quantity) || 1)
+
+            salesSum += subtotal
+            costSum += itemCost
+          })
+
+          setTotalSalesVolume(salesSum)
+          setTotalCostVolume(costSum)
+          setTotalProfit(salesSum - costSum)
+          setTotalSalesCount(itemsData.length)
+        }
+      } else if (periodFilter === 'HISTORICO') {
+        // Fallback en caso de seleccionar HISTORICO si no trae IDs explícitos
+        const { data: itemsData } = await supabase
+          .from('sale_items')
+          .select('quantity, subtotal, unit_price, unit_cost')
+
+        if (itemsData) {
+          let salesSum = 0
+          let costSum = 0
+
+          itemsData.forEach((item: any) => {
+            const subtotal = Number(item.subtotal) || 0
+            const frozenCostUnit = item.unit_cost !== null && item.unit_cost !== undefined ? Number(item.unit_cost) : 0
+            const itemCost = frozenCostUnit * (Number(item.quantity) || 1)
+
+            salesSum += subtotal
+            costSum += itemCost
+          })
+
+          setTotalSalesVolume(salesSum)
+          setTotalCostVolume(costSum)
+          setTotalProfit(salesSum - costSum)
+          setTotalSalesCount(itemsData.length)
+        }
+      } else {
+        // No hay ventas dentro del rango filtrado
+        setTotalSalesVolume(0)
+        setTotalCostVolume(0)
+        setTotalProfit(0)
+        setTotalSalesCount(0)
       }
     } catch (err) {
       console.error('Error en fetchData:', err)
@@ -211,7 +252,7 @@ export default function CashPage() {
         </div>
       </div>
 
-      {/* PANEL FINANCIERO CON FILTRO DE PERÍODO */}
+      {/* PANEL FINANCIERO */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         
         {/* Ventas Totales */}
@@ -315,7 +356,7 @@ export default function CashPage() {
           </div>
         </div>
 
-        {/* Resumen Lateral de Entradas vs Salidas */}
+        {/* Resumen Lateral */}
         <div className="space-y-4">
           <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm space-y-4">
             <h4 className="font-bold text-gray-800 text-sm flex items-center gap-2 border-b pb-2">
