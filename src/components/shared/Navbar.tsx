@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { ShoppingBag, Package, Users, Store } from 'lucide-react'
+import { ShoppingBag, Package, Users, Store, Wallet } from 'lucide-react'
 
 export default function Navbar() {
   const pathname = usePathname()
@@ -11,24 +11,30 @@ export default function Navbar() {
     { name: 'Caja / POS', href: '/pos', icon: ShoppingBag },
     { name: 'Productos', href: '/productos', icon: Package },
     { name: 'Clientes & Fiados', href: '/clientes', icon: Users },
+    { name: 'Corte / Caja', href: '/caja', icon: Wallet },
   ]
 
   return (
-    <header className="bg-white border-b border-gray-200 sticky top-0 z-40">
+    <header className="bg-white border-b border-gray-200 sticky top-0 z-40 shadow-sm">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between h-16 items-center">
           
-          {/* LOGO TIENDA */}
-          <div className="flex items-center gap-2">
-            <div className="p-2 bg-blue-600 text-white rounded-xl">
+          {/* LOGO DE LA TIENDA */}
+          <Link href="/pos" className="flex items-center gap-2.5 hover:opacity-90 transition-opacity">
+            <div className="p-2 bg-blue-600 text-white rounded-xl shadow-sm">
               <Store className="w-5 h-5" />
             </div>
-            <span className="font-extrabold text-lg text-gray-900 tracking-tight">
-              Abarrotes POS
-            </span>
-          </div>
+            <div>
+              <span className="font-extrabold text-base text-gray-900 tracking-tight block leading-none">
+                Abarrotes POS
+              </span>
+              <span className="text-[10px] text-gray-400 font-semibold tracking-wide uppercase">
+                Sistema Beta
+              </span>
+            </div>
+          </Link>
 
-          {/* ENLACES DE NAVEGACIÓN */}
+          {/* MENÚ DE NAVEGACIÓN PRINCIPAL */}
           <nav className="flex gap-1 sm:gap-2">
             {navItems.map((item) => {
               const Icon = item.icon
@@ -38,13 +44,13 @@ export default function Navbar() {
                 <Link
                   key={item.href}
                   href={item.href}
-                  className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all ${
+                  className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all ${
                     isActive
-                      ? 'bg-blue-50 text-blue-700 shadow-sm'
+                      ? 'bg-blue-50 text-blue-700 shadow-sm border border-blue-100'
                       : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
                   }`}
                 >
-                  <Icon className="w-4 h-4" />
+                  <Icon className={`w-4 h-4 ${isActive ? 'text-blue-600' : 'text-gray-500'}`} />
                   <span>{item.name}</span>
                 </Link>
               )
@@ -55,4 +61,5 @@ export default function Navbar() {
       </div>
     </header>
   )
+}
 }
