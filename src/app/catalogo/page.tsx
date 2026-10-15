@@ -299,7 +299,7 @@ export default function CatalogPage() {
 
             <form onSubmit={handleSendWhatsAppOrder} className="pt-2 border-t border-gray-100 space-y-2.5">
               <div>
-                <label className="text-[11px] font-bold text-gray-700 block mb-0.5">Tu Nombre (Opcional):</label>
+                <label className="text-[11px] font-bold text-gray-700 block mb-0.5">Tu Nombre:</label>
                 <input
                   type="text"
                   placeholder="Ej. María López"
