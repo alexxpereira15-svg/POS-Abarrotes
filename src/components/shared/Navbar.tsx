@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { ShoppingBag, Package, Users, Store, Wallet } from 'lucide-react'
+import { ShoppingBag, Package, Users, Store, Wallet, BarChart3 } from 'lucide-react'
 
 export default function Navbar() {
   const pathname = usePathname()
@@ -12,6 +12,7 @@ export default function Navbar() {
     { name: 'Productos', href: '/productos', icon: Package },
     { name: 'Clientes & Fiados', href: '/clientes', icon: Users },
     { name: 'Corte / Caja', href: '/caja', icon: Wallet },
+    { name: 'Reportes', href: '/reportes', icon: BarChart3 },
   ]
 
   return (
