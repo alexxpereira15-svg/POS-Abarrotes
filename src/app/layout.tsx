@@ -6,7 +6,7 @@ import './globals.css'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: 'Punto de Venta - Abarrotes',
+  title: 'Abarrotes el niño',
   description: 'Sistema POS Beta 1.0',
 }
 
