@@ -93,63 +93,23 @@ export default function CashPage() {
         }
       }
 
-      // 3. RECUPERACIÓN EXACTA DE ABONOS (Opción 2: Inversión Primero)
-      // Obtenemos las ventas a crédito con sus costos para desglosar los abonos cobrados
+      // 3. RECUPERACIÓN PURA DE ABONOS (Opción 2: 100% directo a Reinversión)
       const cycleMovements = cycleStartDateIso 
         ? allMovements.filter(m => new Date(m.created_at) > new Date(cycleStartDateIso!))
         : allMovements
 
       const creditAbonosMovements = cycleMovements.filter(m => m.type === 'ABONO_EFECTIVO')
 
-      let abonosCostSum = 0
-      let abonosProfitSum = 0
-
-      if (creditAbonosMovements.length > 0) {
-        const { data: creditSales } = await supabase
-          .from('sales')
-          .select('id, customer_id, total_amount, sale_items(quantity, unit_cost)')
-          .eq('status', 'PENDIENTE_PAGO')
-
-        // Mapeo de costo total por venta de crédito
-        const creditSalesCostMap: { [key: string]: { totalCost: number, totalAmount: number } } = {}
-
-        if (creditSales) {
-          creditSales.forEach((s: any) => {
-            let cost = 0
-            if (s.sale_items) {
-              s.sale_items.forEach((si: any) => {
-                cost += (Number(si.unit_cost) || 0) * (Number(si.quantity) || 1)
-              })
-            }
-            creditSalesCostMap[s.id] = {
-              totalCost: cost,
-              totalAmount: Number(s.total_amount) || 0
-            }
-          })
-        }
-
-        // Para cada abono, priorizar la recuperación de inversión hasta cubrir el costo total del pedido
-        creditAbonosMovements.forEach(abono => {
-          const amount = Number(abono.amount) || 0
-          // Aplicamos la regla: el abono cubre primero la inversión
-          // Si el abono es menor o igual al costo promedio, va 100% a costo.
-          // En caso general de cartera general de tienda, asignamos prioridades.
-          const costPart = Math.min(amount, amount * 0.8) // Seguridad de recuperación
-          const profitPart = amount - costPart
-
-          abonosCostSum += costPart
-          abonosProfitSum += profitPart
-        })
-      }
-
+      // Suma total de abonos recibidos en el ciclo
       const totalAbonosAmount = creditAbonosMovements.reduce((acc, m) => acc + Number(m.amount), 0)
 
+      // APLICACIÓN OPCIÓN 2 STRICTA: El 100% de los abonos entra directo al Fondo de Reinversión
       const totalCombinedSales = salesSum + totalAbonosAmount
-      const totalCombinedCost = costSum + abonosCostSum
+      const totalCombinedCost = costSum + totalAbonosAmount // El 100% del abono recupera costo
 
       setTotalSalesVolume(totalCombinedSales)
       setTotalCostVolume(totalCombinedCost)
-      setTotalProfit(totalCombinedSales - totalCombinedCost)
+      setTotalProfit(totalCombinedSales - totalCombinedCost) // La ganancia se mantiene sin inflarse hasta liquidar
       setTotalSalesCount(itemCount)
 
     } catch (err) {
@@ -297,7 +257,7 @@ export default function CashPage() {
             <ShieldCheck className="w-3.5 h-3.5 text-blue-600" /> Fondo de Reinversión Cobrado
           </span>
           <p className="text-3xl font-extrabold text-gray-800">${totalCostVolume.toFixed(2)}</p>
-          <p className="text-[10px] text-gray-400">Prioridad: Recuperar costo de proveedores primero</p>
+          <p className="text-[10px] text-gray-400">100% de abonos asignados a recuperar costo</p>
         </div>
 
         {/* Utilidad Neta del Ciclo */}
