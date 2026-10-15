@@ -42,7 +42,7 @@ export default function LoginPage() {
             <Store className="w-6 h-6" />
           </div>
           <h1 className="text-xl font-extrabold text-gray-900">Acceso al Sistema</h1>
-          <p className="text-xs text-gray-500">Inicia sesión para gestionar Abarrotes POS</p>
+          <p className="text-xs text-gray-500">Inicia sesión para gestionar Abarrotes el niño </p>
         </div>
 
         {errorMsg && (
