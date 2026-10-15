@@ -87,7 +87,7 @@ export default function CatalogPage() {
     e.preventDefault()
     if (cart.length === 0) return
 
-    let text = `*¡Hola! Me gustaría hacer el siguiente pedido en La Tiendita:*\n\n`
+    let text = `*¡Hola! Me gustaría hacer el siguiente pedido en Abarrotes el niño:*\n\n`
     if (customerName.trim()) text += `👤 *Cliente:* ${customerName.trim()}\n`
     if (deliveryAddress.trim()) text += `📍 *Ubicación / Notas:* ${deliveryAddress.trim()}\n`
     text += `-----------------------------------\n`
@@ -98,7 +98,6 @@ export default function CatalogPage() {
 
     text += `-----------------------------------\n`
     text += `💰 *Total Estimado: $${totalCart.toFixed(2)}*\n\n`
-    text += `¿Me confirmas disponibilidad para pasar / entregar?`
 
     const url = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(text)}`
     window.open(url, '_blank')
@@ -115,7 +114,7 @@ export default function CatalogPage() {
               <Store className="w-6 h-6 text-white" />
             </div>
             <div>
-              <h1 className="font-extrabold text-base leading-tight">La Tiendita</h1>
+              <h1 className="font-extrabold text-base leading-tight">Abarrotes el niño</h1>
               <p className="text-[11px] text-blue-200">Catálogo Digital de Productos</p>
             </div>
           </div>
