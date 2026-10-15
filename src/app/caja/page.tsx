@@ -19,7 +19,7 @@ export default function CashPage() {
   const [movements, setMovements] = useState<CashMovement[]>([])
   const [loading, setLoading] = useState(true)
 
-  // Métricas Financieras del Ciclo Actual (Solo ventas cobradas)
+  // Métricas Financieras del Ciclo Actual
   const [totalSalesVolume, setTotalSalesVolume] = useState(0)
   const [totalCostVolume, setTotalCostVolume] = useState(0)
   const [totalProfit, setTotalProfit] = useState(0)
@@ -46,9 +46,9 @@ export default function CashPage() {
       const allMovements = movData || []
       setMovements(allMovements)
 
-      // Encontrar la fecha del último "Cierre de Ciclo"
+      // Encontrar la fecha del último "CIERRE DE CICLO"
       const lastCycleClosure = allMovements.find(m => 
-        m.type === 'RETIRO_EFECTIVO' && m.concept.includes('CIERRE DE CICLO')
+        m.type === 'RETIRO_EFECTIVO' && (m.concept || '').toUpperCase().includes('CIERRE DE CICLO')
       )
 
       let cycleStartDateIso: string | null = null
@@ -56,11 +56,8 @@ export default function CashPage() {
         cycleStartDateIso = lastCycleClosure.created_at
       }
 
-      // 2. Consultar ventas pagadas a partir del último cierre de ciclo
-      // EXCLUIMOS VENTAS A CRÉDITO PENDIENTES (payment_status != 'PENDIENTE' o no credit)
-      let salesQuery = supabase
-        .from('sales')
-        .select('id, created_at, payment_status, payment_method')
+      // 2. Traer las ventas de la base de datos
+      let salesQuery = supabase.from('sales').select('id, created_at, payment_status')
 
       if (cycleStartDateIso) {
         salesQuery = salesQuery.gt('created_at', cycleStartDateIso)
@@ -69,7 +66,7 @@ export default function CashPage() {
       const { data: salesData } = await salesQuery
 
       if (salesData && salesData.length > 0) {
-        // Filtrar solo las ventas cobradas (excluir créditos pendientes)
+        // Filtrar solo las ventas pagadas (excluir créditos no cobrados)
         const paidSales = salesData.filter((s: any) => s.payment_status !== 'PENDIENTE' && s.payment_status !== 'CREDITO')
         const paidSaleIds = paidSales.map(s => s.id)
 
@@ -104,10 +101,29 @@ export default function CashPage() {
           setTotalSalesCount(0)
         }
       } else {
-        setTotalSalesVolume(0)
-        setTotalCostVolume(0)
-        setTotalProfit(0)
-        setTotalSalesCount(0)
+        // Fallback: Traer todos los sale_items si no hay ventas devueltas en la tabla sales
+        const { data: itemsData } = await supabase
+          .from('sale_items')
+          .select('quantity, subtotal, unit_price, unit_cost')
+
+        if (itemsData) {
+          let salesSum = 0
+          let costSum = 0
+
+          itemsData.forEach((item: any) => {
+            const subtotal = Number(item.subtotal) || 0
+            const frozenCostUnit = item.unit_cost !== null && item.unit_cost !== undefined ? Number(item.unit_cost) : 0
+            const itemCost = frozenCostUnit * (Number(item.quantity) || 1)
+
+            salesSum += subtotal
+            costSum += itemCost
+          })
+
+          setTotalSalesVolume(salesSum)
+          setTotalCostVolume(costSum)
+          setTotalProfit(salesSum - costSum)
+          setTotalSalesCount(itemsData.length)
+        }
       }
     } catch (err) {
       console.error('Error en fetchData:', err)
@@ -172,7 +188,7 @@ export default function CashPage() {
     }
   }
 
-  // CÁLCULOS SEPARADOS ROBUSTOS: CAJÓN VS. BANCO
+  // DETECCIÓN ROBUSTA DE BANCO VS CAJÓN
   const isBankMovement = (m: CashMovement) => {
     if (m.account_type === 'BANCO') return true
     const conceptUpper = (m.concept || '').toUpperCase()
@@ -209,7 +225,7 @@ export default function CashPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Control de Caja y Ciclos de Venta</h1>
           <p className="text-sm text-gray-500">
-            Supervisa tus ganancias reales cobradas, la reinversión y los saldos en efectivo y transferencias.
+            Supervisa tus ganancias, la reinversión y los saldos independientes en efectivo y transferencias.
           </p>
         </div>
 
@@ -235,7 +251,7 @@ export default function CashPage() {
         </div>
       </div>
 
-      {/* PANEL DEL CICLO ACTUAL (SOLO COBRADO) */}
+      {/* PANEL DEL CICLO ACTUAL */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         
         {/* Ventas Totales del Ciclo */}
@@ -243,24 +259,24 @@ export default function CashPage() {
           <div className="absolute -right-2 -bottom-2 opacity-10 text-white">
             <DollarSign className="w-24 h-24 stroke-1" />
           </div>
-          <span className="text-[11px] font-bold text-blue-200 uppercase tracking-wider block">Ventas Cobradas (Ciclo)</span>
+          <span className="text-[11px] font-bold text-blue-200 uppercase tracking-wider block">Ventas en Ciclo Actual</span>
           <p className="text-3xl font-black">${totalSalesVolume.toFixed(2)}</p>
-          <p className="text-[10px] text-blue-300">Excluye créditos pendientes ({totalSalesCount} ítems)</p>
+          <p className="text-[10px] text-blue-300">Ingreso acumulado ({totalSalesCount} ítems)</p>
         </div>
 
         {/* Inversión Recuperada */}
         <div className="p-5 bg-white border border-gray-200 rounded-2xl shadow-sm space-y-1">
           <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider block flex items-center gap-1">
-            <ShieldCheck className="w-3.5 h-3.5 text-blue-600" /> Fondo de Reinversión Cobrado
+            <ShieldCheck className="w-3.5 h-3.5 text-blue-600" /> Fondo de Reinversión
           </span>
           <p className="text-3xl font-extrabold text-gray-800">${totalCostVolume.toFixed(2)}</p>
-          <p className="text-[10px] text-gray-400">Costo real recuperado para surtir</p>
+          <p className="text-[10px] text-gray-400">Costo destinado a reponer inventario</p>
         </div>
 
         {/* Utilidad Neta del Ciclo */}
         <div className="p-5 bg-emerald-50 border border-emerald-200 rounded-2xl shadow-sm space-y-1">
           <span className="text-[11px] font-bold text-emerald-800 uppercase tracking-wider block flex items-center gap-1">
-            <TrendingUp className="w-3.5 h-3.5 text-emerald-600" /> Ganancia Neta Cobrada
+            <TrendingUp className="w-3.5 h-3.5 text-emerald-600" /> Ganancia Neta Acumulada
           </span>
           <p className="text-3xl font-black text-emerald-700">${totalProfit.toFixed(2)}</p>
           <div className="flex items-center gap-1 mt-1">
@@ -308,7 +324,7 @@ export default function CashPage() {
               <DollarSign className="w-5 h-5" />
             </div>
             <div>
-              <span className="text-xs font-bold text-gray-400 uppercase block">Total Líquido Disponible</span>
+              <span className="text-xs font-bold text-gray-400 uppercase block">Total Disponible</span>
               <p className="text-xl font-black text-white">${totalBalance.toFixed(2)}</p>
             </div>
           </div>
