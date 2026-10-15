@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Product, Category, Customer, PaymentMethod } from '@/types'
-import { Search, ShoppingCart, Trash2, Plus, Minus, DollarSign, X, CheckCircle, Share2, CreditCard, User, AlertTriangle } from 'lucide-react'
+import { Search, ShoppingCart, Trash2, Plus, Minus, DollarSign, X, CheckCircle, Share2, CreditCard, User, AlertTriangle, UserPlus } from 'lucide-react'
 
 interface CartItem extends Product {
   quantity: number
@@ -27,11 +27,18 @@ export default function POSPage() {
   const [processing, setProcessing] = useState(false)
   const [completedSale, setCompletedSale] = useState<any | null>(null)
 
+  // Estado para Crear Nuevo Cliente desde Modal de Cobro
+  const [showAddCustomerModal, setShowAddCustomerModal] = useState(false)
+  const [newCustomerName, setNewCustomerName] = useState('')
+  const [newCustomerPhone, setNewCustomerPhone] = useState('')
+  const [newCustomerCreditLimit, setNewCustomerCreditLimit] = useState('500')
+  const [savingCustomer, setSavingCustomer] = useState(false)
+
   const fetchData = async () => {
     setLoading(true)
     const { data: catData } = await supabase.from('categories').select('*')
     const { data: prodData } = await supabase.from('products').select('*').eq('is_active', true)
-    const { data: custData } = await supabase.from('customers').select('*')
+    const { data: custData } = await supabase.from('customers').select('*').order('full_name', { ascending: true })
 
     if (catData) setCategories(catData)
     if (prodData) setProducts(prodData)
@@ -89,6 +96,50 @@ export default function POSPage() {
   const activeCustomer = customers.find(c => c.id === selectedCustomer)
   const isCreditExceeded = paymentMethod === 'CREDITO' && activeCustomer && 
     (activeCustomer.current_balance + totalCart > activeCustomer.credit_limit)
+
+  // Crear Cliente Rápido
+  const handleQuickAddCustomer = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!newCustomerName.trim()) {
+      alert('Ingresa el nombre del cliente.')
+      return
+    }
+
+    setSavingCustomer(true)
+
+    try {
+      const creditLimit = parseFloat(newCustomerCreditLimit) || 500
+
+      const { data, error } = await supabase
+        .from('customers')
+        .insert({
+          full_name: newCustomerName.trim(),
+          phone: newCustomerPhone.trim() || null,
+          credit_limit: creditLimit,
+          current_balance: 0
+        })
+        .select()
+        .single()
+
+      if (error) throw error
+
+      // Actualizar lista y seleccionar al cliente creado
+      setCustomers(prev => [...prev, data].sort((a, b) => a.full_name.localeCompare(b.full_name)))
+      setSelectedCustomer(data.id)
+
+      // Limpiar y cerrar submodal
+      setNewCustomerName('')
+      setNewCustomerPhone('')
+      setNewCustomerCreditLimit('500')
+      setShowAddCustomerModal(false)
+
+    } catch (err) {
+      console.error(err)
+      alert('Error al registrar cliente.')
+    } finally {
+      setSavingCustomer(false)
+    }
+  }
 
   const handleProcessSale = async () => {
     if (cart.length === 0 || processing) return
@@ -206,6 +257,7 @@ export default function POSPage() {
     setAmountPaid('')
     setSelectedCustomer('')
     setPaymentMethod('EFECTIVO')
+    setShowAddCustomerModal(false)
   }
 
   return (
@@ -484,11 +536,22 @@ export default function POSPage() {
                 {paymentMethod === 'CREDITO' && (
                   <div className="space-y-2 mb-3">
                     <div>
-                      <label className="text-xs font-semibold text-gray-600">Seleccionar Cliente:</label>
+                      <div className="flex justify-between items-center mb-1">
+                        <label className="text-xs font-semibold text-gray-600">Seleccionar Cliente:</label>
+                        <button
+                          type="button"
+                          onClick={() => setShowAddCustomerModal(true)}
+                          className="text-[11px] text-blue-600 hover:text-blue-800 font-bold flex items-center gap-1"
+                        >
+                          <UserPlus className="w-3.5 h-3.5" />
+                          + Nuevo Cliente
+                        </button>
+                      </div>
+
                       <select
                         value={selectedCustomer}
                         onChange={(e) => setSelectedCustomer(e.target.value)}
-                        className="w-full mt-1 p-2 bg-gray-50 border rounded-lg text-xs font-medium focus:ring-2 focus:ring-blue-500"
+                        className="w-full p-2 bg-gray-50 border rounded-lg text-xs font-medium focus:ring-2 focus:ring-blue-500"
                       >
                         <option value="">-- Elige un cliente --</option>
                         {customers.map(c => (
@@ -524,6 +587,82 @@ export default function POSPage() {
           </div>
         </div>
       )}
+
+      {/* SUB-MODAL: REGISTRO RÁPIDO DE CLIENTE */}
+      {showAddCustomerModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-5 shadow-2xl relative space-y-3">
+            <div className="flex justify-between items-center border-b pb-2">
+              <h4 className="font-bold text-sm text-gray-900 flex items-center gap-1.5">
+                <UserPlus className="w-4 h-4 text-blue-600" />
+                Registrar Nuevo Cliente
+              </h4>
+              <button
+                type="button"
+                onClick={() => setShowAddCustomerModal(false)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleQuickAddCustomer} className="space-y-2.5 text-xs">
+              <div>
+                <label className="font-semibold text-gray-700 block mb-1">Nombre Completo *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ej. Pedro Gómez"
+                  value={newCustomerName}
+                  onChange={(e) => setNewCustomerName(e.target.value)}
+                  className="w-full p-2 bg-gray-50 border rounded-lg focus:ring-2 focus:ring-blue-500 text-xs"
+                />
+              </div>
+
+              <div>
+                <label className="font-semibold text-gray-700 block mb-1">Teléfono (Opcional)</label>
+                <input
+                  type="tel"
+                  placeholder="Ej. 9991234567"
+                  value={newCustomerPhone}
+                  onChange={(e) => setNewCustomerPhone(e.target.value)}
+                  className="w-full p-2 bg-gray-50 border rounded-lg focus:ring-2 focus:ring-blue-500 text-xs"
+                />
+              </div>
+
+              <div>
+                <label className="font-semibold text-gray-700 block mb-1">Límite de Crédito ($)</label>
+                <input
+                  type="number"
+                  step="50"
+                  placeholder="500"
+                  value={newCustomerCreditLimit}
+                  onChange={(e) => setNewCustomerCreditLimit(e.target.value)}
+                  className="w-full p-2 bg-gray-50 border rounded-lg font-bold text-gray-800 focus:ring-2 focus:ring-blue-500 text-xs"
+                />
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAddCustomerModal(false)}
+                  className="flex-1 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded-lg transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingCustomer}
+                  className="flex-1 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg shadow transition-all active:scale-[0.98]"
+                >
+                  {savingCustomer ? 'Guardando...' : 'Guardar y Seleccionar'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
     </div>
   )
 }
