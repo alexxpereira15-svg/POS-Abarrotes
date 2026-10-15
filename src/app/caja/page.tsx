@@ -19,7 +19,7 @@ export default function CashPage() {
   const [movements, setMovements] = useState<CashMovement[]>([])
   const [loading, setLoading] = useState(true)
 
-  // Métricas Financieras del Ciclo Actual
+  // Métricas Financieras del Ciclo Actual (Solo ventas cobradas)
   const [totalSalesVolume, setTotalSalesVolume] = useState(0)
   const [totalCostVolume, setTotalCostVolume] = useState(0)
   const [totalProfit, setTotalProfit] = useState(0)
@@ -56,8 +56,12 @@ export default function CashPage() {
         cycleStartDateIso = lastCycleClosure.created_at
       }
 
-      // 2. Consultar ventas a partir del último cierre de ciclo
-      let salesQuery = supabase.from('sales').select('id, created_at')
+      // 2. Consultar ventas pagadas a partir del último cierre de ciclo
+      // EXCLUIMOS VENTAS A CRÉDITO PENDIENTES (payment_status != 'PENDIENTE' o no credit)
+      let salesQuery = supabase
+        .from('sales')
+        .select('id, created_at, payment_status, payment_method')
+
       if (cycleStartDateIso) {
         salesQuery = salesQuery.gt('created_at', cycleStartDateIso)
       }
@@ -65,30 +69,39 @@ export default function CashPage() {
       const { data: salesData } = await salesQuery
 
       if (salesData && salesData.length > 0) {
-        const saleIds = salesData.map(s => s.id)
+        // Filtrar solo las ventas cobradas (excluir créditos pendientes)
+        const paidSales = salesData.filter((s: any) => s.payment_status !== 'PENDIENTE' && s.payment_status !== 'CREDITO')
+        const paidSaleIds = paidSales.map(s => s.id)
 
-        const { data: itemsData } = await supabase
-          .from('sale_items')
-          .select('quantity, subtotal, unit_price, unit_cost')
-          .in('sale_id', saleIds)
+        if (paidSaleIds.length > 0) {
+          const { data: itemsData } = await supabase
+            .from('sale_items')
+            .select('quantity, subtotal, unit_price, unit_cost')
+            .in('sale_id', paidSaleIds)
 
-        if (itemsData) {
-          let salesSum = 0
-          let costSum = 0
+          if (itemsData) {
+            let salesSum = 0
+            let costSum = 0
 
-          itemsData.forEach((item: any) => {
-            const subtotal = Number(item.subtotal) || 0
-            const frozenCostUnit = item.unit_cost !== null && item.unit_cost !== undefined ? Number(item.unit_cost) : 0
-            const itemCost = frozenCostUnit * (Number(item.quantity) || 1)
+            itemsData.forEach((item: any) => {
+              const subtotal = Number(item.subtotal) || 0
+              const frozenCostUnit = item.unit_cost !== null && item.unit_cost !== undefined ? Number(item.unit_cost) : 0
+              const itemCost = frozenCostUnit * (Number(item.quantity) || 1)
 
-            salesSum += subtotal
-            costSum += itemCost
-          })
+              salesSum += subtotal
+              costSum += itemCost
+            })
 
-          setTotalSalesVolume(salesSum)
-          setTotalCostVolume(costSum)
-          setTotalProfit(salesSum - costSum)
-          setTotalSalesCount(itemsData.length)
+            setTotalSalesVolume(salesSum)
+            setTotalCostVolume(costSum)
+            setTotalProfit(salesSum - costSum)
+            setTotalSalesCount(itemsData.length)
+          }
+        } else {
+          setTotalSalesVolume(0)
+          setTotalCostVolume(0)
+          setTotalProfit(0)
+          setTotalSalesCount(0)
         }
       } else {
         setTotalSalesVolume(0)
@@ -159,21 +172,27 @@ export default function CashPage() {
     }
   }
 
-  // CÁLCULOS SEPARADOS: CAJÓN VS. BANCO
+  // CÁLCULOS SEPARADOS ROBUSTOS: CAJÓN VS. BANCO
+  const isBankMovement = (m: CashMovement) => {
+    if (m.account_type === 'BANCO') return true
+    const conceptUpper = (m.concept || '').toUpperCase()
+    return conceptUpper.includes('TRANSFERENCIA') || conceptUpper.includes('BANCO')
+  }
+
   const cashIn = movements
-    .filter(m => (m.account_type === 'EFECTIVO' || !m.account_type) && m.type !== 'RETIRO_EFECTIVO')
+    .filter(m => !isBankMovement(m) && m.type !== 'RETIRO_EFECTIVO')
     .reduce((acc, m) => acc + Number(m.amount), 0)
 
   const cashOut = movements
-    .filter(m => (m.account_type === 'EFECTIVO' || !m.account_type) && m.type === 'RETIRO_EFECTIVO')
+    .filter(m => !isBankMovement(m) && m.type === 'RETIRO_EFECTIVO')
     .reduce((acc, m) => acc + Number(m.amount), 0)
 
   const bankIn = movements
-    .filter(m => m.account_type === 'BANCO' && m.type !== 'RETIRO_EFECTIVO')
+    .filter(m => isBankMovement(m) && m.type !== 'RETIRO_EFECTIVO')
     .reduce((acc, m) => acc + Number(m.amount), 0)
 
   const bankOut = movements
-    .filter(m => m.account_type === 'BANCO' && m.type === 'RETIRO_EFECTIVO')
+    .filter(m => isBankMovement(m) && m.type === 'RETIRO_EFECTIVO')
     .reduce((acc, m) => acc + Number(m.amount), 0)
 
   const cashBalance = cashIn - cashOut
@@ -190,7 +209,7 @@ export default function CashPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Control de Caja y Ciclos de Venta</h1>
           <p className="text-sm text-gray-500">
-            Supervisa tus ganancias, la reinversión y los saldos independientes en efectivo y transferencias.
+            Supervisa tus ganancias reales cobradas, la reinversión y los saldos en efectivo y transferencias.
           </p>
         </div>
 
@@ -216,7 +235,7 @@ export default function CashPage() {
         </div>
       </div>
 
-      {/* PANEL DEL CICLO ACTUAL */}
+      {/* PANEL DEL CICLO ACTUAL (SOLO COBRADO) */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         
         {/* Ventas Totales del Ciclo */}
@@ -224,24 +243,24 @@ export default function CashPage() {
           <div className="absolute -right-2 -bottom-2 opacity-10 text-white">
             <DollarSign className="w-24 h-24 stroke-1" />
           </div>
-          <span className="text-[11px] font-bold text-blue-200 uppercase tracking-wider block">Ventas en Ciclo Actual</span>
+          <span className="text-[11px] font-bold text-blue-200 uppercase tracking-wider block">Ventas Cobradas (Ciclo)</span>
           <p className="text-3xl font-black">${totalSalesVolume.toFixed(2)}</p>
-          <p className="text-[10px] text-blue-300">Ingreso acumulado ({totalSalesCount} ítems)</p>
+          <p className="text-[10px] text-blue-300">Excluye créditos pendientes ({totalSalesCount} ítems)</p>
         </div>
 
         {/* Inversión Recuperada */}
         <div className="p-5 bg-white border border-gray-200 rounded-2xl shadow-sm space-y-1">
           <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider block flex items-center gap-1">
-            <ShieldCheck className="w-3.5 h-3.5 text-blue-600" /> Fondo de Reinversión
+            <ShieldCheck className="w-3.5 h-3.5 text-blue-600" /> Fondo de Reinversión Cobrado
           </span>
           <p className="text-3xl font-extrabold text-gray-800">${totalCostVolume.toFixed(2)}</p>
-          <p className="text-[10px] text-gray-400">Costo destinado a reponer inventario</p>
+          <p className="text-[10px] text-gray-400">Costo real recuperado para surtir</p>
         </div>
 
         {/* Utilidad Neta del Ciclo */}
         <div className="p-5 bg-emerald-50 border border-emerald-200 rounded-2xl shadow-sm space-y-1">
           <span className="text-[11px] font-bold text-emerald-800 uppercase tracking-wider block flex items-center gap-1">
-            <TrendingUp className="w-3.5 h-3.5 text-emerald-600" /> Ganancia Neta Acumulada
+            <TrendingUp className="w-3.5 h-3.5 text-emerald-600" /> Ganancia Neta Cobrada
           </span>
           <p className="text-3xl font-black text-emerald-700">${totalProfit.toFixed(2)}</p>
           <div className="flex items-center gap-1 mt-1">
@@ -277,7 +296,7 @@ export default function CashPage() {
             </div>
             <div>
               <span className="text-xs font-bold text-gray-500 uppercase block">Banco / Transferencias</span>
-              <p className="text-xl font-black text-gray-900">${bankBalance.toFixed(2)}</p>
+              <p className="text-xl font-black text-blue-700">${bankBalance.toFixed(2)}</p>
             </div>
           </div>
         </div>
@@ -289,7 +308,7 @@ export default function CashPage() {
               <DollarSign className="w-5 h-5" />
             </div>
             <div>
-              <span className="text-xs font-bold text-gray-400 uppercase block">Total Disponible</span>
+              <span className="text-xs font-bold text-gray-400 uppercase block">Total Líquido Disponible</span>
               <p className="text-xl font-black text-white">${totalBalance.toFixed(2)}</p>
             </div>
           </div>
@@ -326,7 +345,7 @@ export default function CashPage() {
               ) : (
                 movements.map(m => {
                   const isWithdrawal = m.type === 'RETIRO_EFECTIVO'
-                  const isBank = m.account_type === 'BANCO'
+                  const isBank = isBankMovement(m)
 
                   return (
                     <tr key={m.id} className="hover:bg-gray-50/50 transition-colors">
@@ -451,7 +470,7 @@ export default function CashPage() {
                 </div>
               </div>
 
-              {/* RESUMEN DEL CIERRE DE CICLO SI SE SELECCIONA CIERRE TOTAL */}
+              {/* RESUMEN DEL CIERRE DE CICLO */}
               {withdrawalMode === 'CIERRE_TOTAL' ? (
                 <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl space-y-1.5 text-xs">
                   <p className="font-bold text-blue-900 flex items-center gap-1">
