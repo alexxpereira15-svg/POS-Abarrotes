@@ -114,7 +114,7 @@ export default function CatalogPage() {
               <Store className="w-6 h-6 text-white" />
             </div>
             <div>
-              <h1 className="font-extrabold text-base leading-tight">Abarrotes el niño</h1>
+              <h1 className="font-extrabold text-base leading-tight"> Abarrotes el niño </h1>
               <p className="text-[11px] text-blue-200">Catálogo Digital de Productos</p>
             </div>
           </div>
