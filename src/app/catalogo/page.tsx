@@ -10,7 +10,7 @@ interface CartItem extends Product {
 }
 
 // ⚠️ CAMBIA ESTE NÚMERO POR TU NÚMERO DE WHATSAPP (Con clave de país, ej. 529991234567)
-const WHATSAPP_NUMBER = '529991234567'
+const WHATSAPP_NUMBER = '529993557616'
 
 export default function CatalogPage() {
   const supabase = createClient()
