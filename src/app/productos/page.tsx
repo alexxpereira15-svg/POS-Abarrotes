@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Product, Category } from '@/types'
-import { Plus, Search, Package, AlertTriangle, ArrowUpCircle, Tag, Edit3 } from 'lucide-react'
+import { Plus, Search, Package, AlertTriangle, ArrowUpCircle, Tag, Edit3, Trash2 } from 'lucide-react'
 
 export default function ProductsPage() {
   const supabase = createClient()
@@ -90,7 +90,7 @@ export default function ProductsPage() {
   // Guardar Edición de Producto
   const handleUpdateProduct = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!editingProduct || !name.trim()) return
+    if (!editingProduct || !name.trim() || !categoryId) return
 
     setSaving(true)
 
@@ -98,7 +98,7 @@ export default function ProductsPage() {
       const { error } = await supabase
         .from('products')
         .update({
-          category_id: categoryId || editingProduct.category_id,
+          category_id: categoryId,
           name: name.trim(),
           price: parseFloat(price) || 0,
           cost_price: parseFloat(costPrice) || 0,
@@ -117,6 +117,22 @@ export default function ProductsPage() {
       alert('Error al actualizar el producto.')
     } finally {
       setSaving(false)
+    }
+  }
+
+  // Eliminar Producto
+  const handleDeleteProduct = async (p: Product) => {
+    const confirmDelete = window.confirm(`¿Estás seguro de que deseas eliminar "${p.name}" (${p.sku_code}) del catálogo?`)
+    if (!confirmDelete) return
+
+    try {
+      const { error } = await supabase.from('products').delete().eq('id', p.id)
+      if (error) throw error
+
+      fetchData()
+    } catch (err) {
+      console.error(err)
+      alert('No se pudo eliminar el producto. Si ya tiene ventas asociadas, se recomienda mantenerlo inactivo.')
     }
   }
 
@@ -206,7 +222,7 @@ export default function ProductsPage() {
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Catálogo e Inventario</h1>
-          <p className="text-sm text-gray-500">Maneja productos, precios, costos y existencias.</p>
+          <p className="text-sm text-gray-500">Maneja productos, precios, costos, categorías y existencias.</p>
         </div>
 
         <div className="flex gap-2">
@@ -218,7 +234,16 @@ export default function ProductsPage() {
             Nueva Categoría
           </button>
           <button
-            onClick={() => setShowNewModal(true)}
+            onClick={() => {
+              setCategoryId('')
+              setName('')
+              setPrice('')
+              setCostPrice('')
+              setStock('10')
+              setMinStock('5')
+              setImageUrl('')
+              setShowNewModal(true)
+            }}
             className="py-2.5 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold flex items-center gap-2 shadow-sm text-sm"
           >
             <Plus className="w-4 h-4" />
@@ -296,6 +321,13 @@ export default function ProductsPage() {
                         <ArrowUpCircle className="w-3.5 h-3.5" />
                         Surtir
                       </button>
+                      <button
+                        onClick={() => handleDeleteProduct(p)}
+                        className="p-1.5 bg-red-50 text-red-600 hover:bg-red-100 rounded-lg transition-colors inline-flex items-center justify-center"
+                        title="Eliminar producto"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                     </td>
                   </tr>
                 )
@@ -312,6 +344,21 @@ export default function ProductsPage() {
             <h3 className="text-lg font-bold text-gray-900">Editar Producto: <span className="font-mono text-blue-600">{editingProduct.sku_code}</span></h3>
 
             <form onSubmit={handleUpdateProduct} className="space-y-3">
+              <div>
+                <label className="text-xs font-semibold text-gray-600">Categoría *</label>
+                <select
+                  required
+                  value={categoryId}
+                  onChange={(e) => setCategoryId(e.target.value)}
+                  className="w-full mt-1 p-2 bg-gray-50 border rounded-lg text-sm font-medium"
+                >
+                  <option value="">-- Selecciona una categoría --</option>
+                  {categories.map(c => (
+                    <option key={c.id} value={c.id}>{c.name} ({c.code_prefix})</option>
+                  ))}
+                </select>
+              </div>
+
               <div>
                 <label className="text-xs font-semibold text-gray-600">Nombre del Producto *</label>
                 <input
