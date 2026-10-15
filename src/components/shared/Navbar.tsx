@@ -1,11 +1,31 @@
 'use client'
 
-import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { ShoppingBag, Package, Users, Store, Wallet, BarChart3 } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { createClient } from '@/lib/supabase/client'
+import Link from 'next/link'
+import { ShoppingBag, Package, Users, Store, Wallet, BarChart3, LogOut } from 'lucide-react'
 
 export default function Navbar() {
   const pathname = usePathname()
+  const supabase = createClient()
+  const [user, setUser] = useState<any>(null)
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      setUser(data.user)
+    })
+  }, [pathname])
+
+  // OCULTAR BARRA DE NAVEGACIÓN EN PÁGINAS PÚBLICAS O SIN SESIÓN
+  if (pathname === '/catalogo' || pathname === '/login' || !user) {
+    return null
+  }
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut()
+    window.location.href = '/login'
+  }
 
   const navItems = [
     { name: 'Caja / POS', href: '/pos', icon: ShoppingBag },
@@ -20,7 +40,6 @@ export default function Navbar() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between h-16 items-center">
           
-          {/* LOGO DE LA TIENDA */}
           <Link href="/pos" className="flex items-center gap-2.5 hover:opacity-90 transition-opacity">
             <div className="p-2 bg-blue-600 text-white rounded-xl shadow-sm">
               <Store className="w-5 h-5" />
@@ -30,13 +49,12 @@ export default function Navbar() {
                 Abarrotes POS
               </span>
               <span className="text-[10px] text-gray-400 font-semibold tracking-wide uppercase">
-                Sistema Beta
+                Panel Admin
               </span>
             </div>
           </Link>
 
-          {/* MENÚ DE NAVEGACIÓN PRINCIPAL */}
-          <nav className="flex gap-1 sm:gap-2">
+          <nav className="flex gap-1 sm:gap-2 items-center">
             {navItems.map((item) => {
               const Icon = item.icon
               const isActive = pathname === item.href
@@ -56,6 +74,14 @@ export default function Navbar() {
                 </Link>
               )
             })}
+
+            <button
+              onClick={handleLogout}
+              className="ml-2 p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors"
+              title="Cerrar Sesión"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
           </nav>
 
         </div>
