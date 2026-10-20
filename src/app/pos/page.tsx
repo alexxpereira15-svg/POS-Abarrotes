@@ -3,10 +3,13 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Product, Category, Customer, PaymentMethod } from '@/types'
-import { Search, ShoppingCart, Trash2, Plus, Minus, DollarSign, X, CheckCircle, Share2, CreditCard, User, AlertTriangle, UserPlus } from 'lucide-react'
+import { Search, ShoppingCart, Trash2, Plus, Minus, DollarSign, X, CheckCircle, Share2, CreditCard, User, AlertTriangle, UserPlus, Tag } from 'lucide-react'
 
 interface CartItem extends Product {
-  quantity: number
+  quantity: number;
+  promo_type?: string;
+  promo_qty?: number;
+  promo_price?: number;
 }
 
 export default function POSPage() {
@@ -27,7 +30,6 @@ export default function POSPage() {
   const [processing, setProcessing] = useState(false)
   const [completedSale, setCompletedSale] = useState<any | null>(null)
 
-  // Estado para Crear Nuevo Cliente desde Modal de Cobro
   const [showAddCustomerModal, setShowAddCustomerModal] = useState(false)
   const [newCustomerName, setNewCustomerName] = useState('')
   const [newCustomerPhone, setNewCustomerPhone] = useState('')
@@ -56,6 +58,17 @@ export default function POSPage() {
                           product.sku_code.toLowerCase().includes(searchQuery.toLowerCase())
     return matchesCategory && matchesSearch
   })
+
+  // Función para calcular subtotal con promoción aplicada
+  const calculateItemSubtotal = (item: CartItem) => {
+    const { price, quantity, promo_type, promo_qty, promo_price } = item
+    if (promo_type === 'COMBO_QTY' && promo_qty && promo_qty > 0 && promo_price && promo_price > 0) {
+      const combos = Math.floor(quantity / promo_qty)
+      const remainder = quantity % promo_qty
+      return (combos * promo_price) + (remainder * price)
+    }
+    return price * quantity
+  }
 
   const addToCart = (product: Product) => {
     if (product.stock <= 0) return
@@ -90,14 +103,13 @@ export default function POSPage() {
     setCart(prev => prev.filter(item => item.id !== id))
   }
 
-  const totalCart = cart.reduce((acc, item) => acc + (item.price * item.quantity), 0)
+  const totalCart = cart.reduce((acc, item) => acc + calculateItemSubtotal(item), 0)
   const changeDue = Math.max(0, (parseFloat(amountPaid) || 0) - totalCart)
 
   const activeCustomer = customers.find(c => c.id === selectedCustomer)
   const isCreditExceeded = paymentMethod === 'CREDITO' && activeCustomer && 
     (activeCustomer.current_balance + totalCart > activeCustomer.credit_limit)
 
-  // Crear Cliente Rápido
   const handleQuickAddCustomer = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!newCustomerName.trim()) {
@@ -123,11 +135,9 @@ export default function POSPage() {
 
       if (error) throw error
 
-      // Actualizar lista y seleccionar al cliente creado
       setCustomers(prev => [...prev, data].sort((a, b) => a.full_name.localeCompare(b.full_name)))
       setSelectedCustomer(data.id)
 
-      // Limpiar y cerrar submodal
       setNewCustomerName('')
       setNewCustomerPhone('')
       setNewCustomerCreditLimit('500')
@@ -177,7 +187,7 @@ export default function POSPage() {
         quantity: item.quantity,
         unit_price: item.price,
         unit_cost: item.cost_price || 0,
-        subtotal: item.price * item.quantity
+        subtotal: calculateItemSubtotal(item)
       }))
 
       const { error: itemsError } = await supabase.from('sale_items').insert(saleItems)
@@ -190,7 +200,6 @@ export default function POSPage() {
           .eq('id', item.id)
       }
 
-      // REGISTRO DE MOVIMIENTO DE CAJA SEGÚN MÉTODO DE PAGO
       if (paymentMethod === 'EFECTIVO') {
         await supabase.from('cash_movements').insert({
           type: 'VENTA_EFECTIVO',
@@ -234,11 +243,11 @@ export default function POSPage() {
 
   const generateWhatsAppLink = () => {
     if (!completedSale) return ''
-    let text = `*Ticket de Compra - La Tiendita*\n`
+    let text = `*Ticket de Compra - Abarrotes el niño*\n`
     text += `Folio: ${completedSale.code}\n`
     text += `--------------------------------\n`
     completedSale.cart.forEach((item: CartItem) => {
-      text += `${item.quantity}x ${item.name} - $${(item.price * item.quantity).toFixed(2)}\n`
+      text += `${item.quantity}x ${item.name} - $${calculateItemSubtotal(item).toFixed(2)}\n`
     })
     text += `--------------------------------\n`
     text += `*Total: $${completedSale.total.toFixed(2)}*\n`
@@ -263,7 +272,7 @@ export default function POSPage() {
   return (
     <div className="flex h-[calc(100vh-4rem)] bg-gray-100 font-sans">
       
-      {/* CATÁLOGO DE PRODUCTOS (GRID COMPACTO) */}
+      {/* CATÁLOGO DE PRODUCTOS */}
       <div className="flex-1 flex flex-col p-4 overflow-hidden">
         
         {/* Buscador */}
@@ -272,7 +281,7 @@ export default function POSPage() {
             <Search className="absolute left-3 top-2.5 text-gray-400 w-4 h-4" />
             <input
               type="text"
-              placeholder="Buscar producto o código (ej. SAB-001)..."
+              placeholder="Buscar producto o código..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full pl-9 pr-4 py-1.5 bg-white rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -303,16 +312,17 @@ export default function POSPage() {
           ))}
         </div>
 
-        {/* Grid Ajustado (Compacto) */}
+        {/* Grid de Productos */}
         <div className="flex-1 overflow-y-auto grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 p-1 align-content-start">
           {loading ? (
             <div className="col-span-full text-center py-10 text-gray-500 text-sm">Cargando productos...</div>
           ) : filteredProducts.length === 0 ? (
             <div className="col-span-full text-center py-10 text-gray-400 text-sm">No se encontraron productos.</div>
           ) : (
-            filteredProducts.map(product => {
+            filteredProducts.map((product: any) => {
               const isOutOfStock = product.stock <= 0
               const isLowStock = product.stock > 0 && product.stock <= product.min_stock
+              const hasPromo = product.promo_type === 'COMBO_QTY' && product.promo_qty && product.promo_price
 
               return (
                 <div
@@ -347,6 +357,14 @@ export default function POSPage() {
                     )}
 
                     <h3 className="font-semibold text-gray-800 text-xs line-clamp-2 leading-tight">{product.name}</h3>
+
+                    {/* ETIQUETA DE PROMOCIÓN */}
+                    {hasPromo && (
+                      <div className="mt-1 inline-flex items-center gap-1 bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded text-[10px] font-extrabold">
+                        <Tag className="w-3 h-3" />
+                        <span>{product.promo_qty}x${product.promo_price}</span>
+                      </div>
+                    )}
                   </div>
 
                   <div className="mt-2 pt-1.5 border-t border-gray-100 flex justify-between items-center">
@@ -386,32 +404,42 @@ export default function POSPage() {
               <p className="text-xs">El carrito está vacío</p>
             </div>
           ) : (
-            cart.map(item => (
-              <div key={item.id} className="py-2 flex items-center justify-between gap-2">
-                <div className="flex-1">
-                  <h4 className="text-xs font-semibold text-gray-800 leading-tight">{item.name}</h4>
-                  <span className="text-[11px] text-gray-500">${item.price.toFixed(2)} c/u</span>
-                </div>
+            cart.map(item => {
+              const itemSubtotal = calculateItemSubtotal(item)
+              const hasPromoApplied = item.promo_type === 'COMBO_QTY' && item.promo_qty && item.quantity >= item.promo_qty
 
-                <div className="flex items-center gap-1 bg-gray-100 rounded-md p-0.5">
-                  <button onClick={() => updateQuantity(item.id, -1)} className="p-0.5 hover:bg-white rounded text-gray-600">
-                    <Minus className="w-3 h-3" />
+              return (
+                <div key={item.id} className="py-2 flex items-center justify-between gap-2">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-1">
+                      <h4 className="text-xs font-semibold text-gray-800 leading-tight">{item.name}</h4>
+                      {hasPromoApplied && (
+                        <span className="bg-amber-100 text-amber-800 text-[9px] font-bold px-1 rounded">Promo</span>
+                      )}
+                    </div>
+                    <span className="text-[11px] text-gray-500">${item.price.toFixed(2)} c/u</span>
+                  </div>
+
+                  <div className="flex items-center gap-1 bg-gray-100 rounded-md p-0.5">
+                    <button onClick={() => updateQuantity(item.id, -1)} className="p-0.5 hover:bg-white rounded text-gray-600">
+                      <Minus className="w-3 h-3" />
+                    </button>
+                    <span className="text-xs font-bold px-1.5">{item.quantity}</span>
+                    <button onClick={() => updateQuantity(item.id, 1)} className="p-0.5 hover:bg-white rounded text-gray-600">
+                      <Plus className="w-3 h-3" />
+                    </button>
+                  </div>
+
+                  <div className="text-right min-w-[50px]">
+                    <span className="text-xs font-bold text-gray-900">${itemSubtotal.toFixed(2)}</span>
+                  </div>
+
+                  <button onClick={() => removeFromCart(item.id)} className="text-gray-400 hover:text-red-500 p-0.5">
+                    <Trash2 className="w-3.5 h-3.5" />
                   </button>
-                  <span className="text-xs font-bold px-1.5">{item.quantity}</span>
-                  <button onClick={() => updateQuantity(item.id, 1)} className="p-0.5 hover:bg-white rounded text-gray-600">
-                    <Plus className="w-3 h-3" />
-                  </button>
                 </div>
-
-                <div className="text-right min-w-[50px]">
-                  <span className="text-xs font-bold text-gray-900">${(item.price * item.quantity).toFixed(2)}</span>
-                </div>
-
-                <button onClick={() => removeFromCart(item.id)} className="text-gray-400 hover:text-red-500 p-0.5">
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            ))
+              )
+            })
           )}
         </div>
 
@@ -588,7 +616,7 @@ export default function POSPage() {
         </div>
       )}
 
-      {/* SUB-MODAL: REGISTRO RÁPIDO DE CLIENTE */}
+      {/* SUB-MODAL REGISTRO RÁPIDO DE CLIENTE */}
       {showAddCustomerModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl max-w-sm w-full p-5 shadow-2xl relative space-y-3">
