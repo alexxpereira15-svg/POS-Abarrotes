@@ -3,10 +3,13 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Product, Category } from '@/types'
-import { Search, ShoppingBag, Plus, Minus, Trash2, Send, Store, Lightbulb } from 'lucide-react'
+import { Search, ShoppingBag, Plus, Minus, Trash2, Send, Store, Lightbulb, Tag } from 'lucide-react'
 
 interface CartItem extends Product {
-  quantity: number
+  quantity: number;
+  promo_type?: string;
+  promo_qty?: number;
+  promo_price?: number;
 }
 
 // ⚠️ NÚMERO DE WHATSAPP PARA RECIBIR PEDIDOS Y SUGERENCIAS
@@ -48,6 +51,17 @@ export default function CatalogPage() {
     return matchesCategory && matchesSearch
   })
 
+  // Cálculo de subtotal considerando promociones de combo
+  const calculateItemSubtotal = (item: CartItem) => {
+    const { price, quantity, promo_type, promo_qty, promo_price } = item
+    if (promo_type === 'COMBO_QTY' && promo_qty && promo_qty > 0 && promo_price && promo_price > 0) {
+      const combos = Math.floor(quantity / promo_qty)
+      const remainder = quantity % promo_qty
+      return (combos * promo_price) + (remainder * price)
+    }
+    return price * quantity
+  }
+
   const addToCart = (product: Product) => {
     if (product.stock <= 0) return
 
@@ -81,10 +95,10 @@ export default function CatalogPage() {
     setCart(prev => prev.filter(item => item.id !== id))
   }
 
-  const totalCart = cart.reduce((acc, item) => acc + (item.price * item.quantity), 0)
+  const totalCart = cart.reduce((acc, item) => acc + calculateItemSubtotal(item), 0)
   const totalItems = cart.reduce((acc, item) => acc + item.quantity, 0)
 
-  // Enviar pedido por WhatsApp
+  // Enviar pedido por WhatsApp con desgloses de promociones
   const handleSendWhatsAppOrder = (e: React.FormEvent) => {
     e.preventDefault()
     if (cart.length === 0) return
@@ -95,7 +109,8 @@ export default function CatalogPage() {
     text += `-----------------------------------\n`
 
     cart.forEach(item => {
-      text += `• ${item.quantity}x ${item.name} - $${(item.price * item.quantity).toFixed(2)}\n`
+      const subtotal = calculateItemSubtotal(item)
+      text += `• ${item.quantity}x ${item.name} - $${subtotal.toFixed(2)}\n`
     })
 
     text += `-----------------------------------\n`
@@ -185,17 +200,18 @@ export default function CatalogPage() {
           ))}
         </div>
 
-        {/* LISTADO DE PRODUCTOS */}
+        {/* LISTADO DE PRODUCTOS CON ETIQUETAS DE PROMOCIÓN */}
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           {loading ? (
             <div className="col-span-full text-center py-12 text-gray-400 text-xs">Cargando productos disponibles...</div>
           ) : filteredProducts.length === 0 ? (
             <div className="col-span-full text-center py-12 text-gray-400 text-xs">No se encontraron productos.</div>
           ) : (
-            filteredProducts.map(product => {
+            filteredProducts.map((product: any) => {
               const isOutOfStock = product.stock <= 0
               const cartItem = cart.find(item => item.id === product.id)
               const qtyInCart = cartItem ? cartItem.quantity : 0
+              const hasPromo = product.promo_type === 'COMBO_QTY' && product.promo_qty && product.promo_price
 
               return (
                 <div
@@ -216,6 +232,14 @@ export default function CatalogPage() {
                     )}
 
                     <h3 className="font-bold text-gray-800 text-xs leading-tight line-clamp-2">{product.name}</h3>
+
+                    {/* BADGE VISUAL DE PROMOCIÓN */}
+                    {hasPromo && (
+                      <div className="mt-1.5 inline-flex items-center gap-1 bg-amber-100 text-amber-800 px-2 py-0.5 rounded-md text-[10px] font-extrabold border border-amber-200">
+                        <Tag className="w-3 h-3 text-amber-600" />
+                        <span>¡{product.promo_qty}x${product.promo_price.toFixed(2)}!</span>
+                      </div>
+                    )}
                   </div>
 
                   <div className="mt-3 pt-2 border-t border-gray-100 flex items-center justify-between">
@@ -248,7 +272,7 @@ export default function CatalogPage() {
           )}
         </div>
 
-        {/* SECCIÓN HASTA ABAJO: SUGERIR PRODUCTOS */}
+        {/* SECCIÓN SUGERIR PRODUCTOS */}
         <section className="bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200 rounded-3xl p-5 shadow-sm space-y-3">
           <div className="flex items-center gap-2.5">
             <div className="p-2 bg-amber-500 text-white rounded-2xl shadow-sm">
@@ -299,7 +323,7 @@ export default function CatalogPage() {
         </div>
       )}
 
-      {/* MODAL / DRAWER DEL CARRITO DE PEDIDO */}
+      {/* MODAL DEL CARRITO DE PEDIDO */}
       {isCartOpen && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
           <div className="bg-white rounded-t-3xl sm:rounded-2xl max-w-md w-full p-5 shadow-2xl max-h-[90vh] flex flex-col relative space-y-3">
@@ -314,32 +338,42 @@ export default function CatalogPage() {
             </div>
 
             <div className="flex-1 overflow-y-auto divide-y divide-gray-100 max-h-60 pr-1">
-              {cart.map(item => (
-                <div key={item.id} className="py-2.5 flex items-center justify-between gap-2">
-                  <div className="flex-1">
-                    <h4 className="text-xs font-bold text-gray-800 leading-tight">{item.name}</h4>
-                    <span className="text-[11px] text-gray-500">${item.price.toFixed(2)} c/u</span>
-                  </div>
+              {cart.map(item => {
+                const subtotal = calculateItemSubtotal(item)
+                const hasPromoApplied = item.promo_type === 'COMBO_QTY' && item.promo_qty && item.quantity >= item.promo_qty
 
-                  <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-0.5">
-                    <button onClick={() => updateQuantity(item.id, -1)} className="p-1 hover:bg-white rounded text-gray-700">
-                      <Minus className="w-3 h-3" />
+                return (
+                  <div key={item.id} className="py-2.5 flex items-center justify-between gap-2">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-1">
+                        <h4 className="text-xs font-bold text-gray-800 leading-tight">{item.name}</h4>
+                        {hasPromoApplied && (
+                          <span className="bg-amber-100 text-amber-800 text-[9px] font-bold px-1 rounded">Promo</span>
+                        )}
+                      </div>
+                      <span className="text-[11px] text-gray-500">${item.price.toFixed(2)} c/u</span>
+                    </div>
+
+                    <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-0.5">
+                      <button onClick={() => updateQuantity(item.id, -1)} className="p-1 hover:bg-white rounded text-gray-700">
+                        <Minus className="w-3 h-3" />
+                      </button>
+                      <span className="text-xs font-bold px-1.5">{item.quantity}</span>
+                      <button onClick={() => updateQuantity(item.id, 1)} className="p-1 hover:bg-white rounded text-gray-700">
+                        <Plus className="w-3 h-3" />
+                      </button>
+                    </div>
+
+                    <span className="text-xs font-black text-gray-900 min-w-[50px] text-right">
+                      ${subtotal.toFixed(2)}
+                    </span>
+
+                    <button onClick={() => removeFromCart(item.id)} className="text-gray-400 hover:text-red-500 p-1">
+                      <Trash2 className="w-3.5 h-3.5" />
                     </button>
-                    <span className="text-xs font-bold px-1.5">{item.quantity}</span>
-                    <button onClick={() => updateQuantity(item.id, 1)} className="p-1 hover:bg-white rounded text-gray-700">
-                      <Plus className="w-3 h-3" />
-                    </button>
                   </div>
-
-                  <span className="text-xs font-black text-gray-900 min-w-[50px] text-right">
-                    ${(item.price * item.quantity).toFixed(2)}
-                  </span>
-
-                  <button onClick={() => removeFromCart(item.id)} className="text-gray-400 hover:text-red-500 p-1">
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              ))}
+                )
+              })}
             </div>
 
             <form onSubmit={handleSendWhatsAppOrder} className="pt-2 border-t border-gray-100 space-y-2.5">
