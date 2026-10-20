@@ -3,44 +3,41 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Product, Category } from '@/types'
-import { Plus, Search, Package, AlertTriangle, ArrowUpCircle, Tag, Edit3, Trash2, Calculator } from 'lucide-react'
+import { Plus, Edit, Trash2, Search, Package, Image as ImageIcon, AlertTriangle, Tag } from 'lucide-react'
 
 export default function ProductsPage() {
   const supabase = createClient()
 
   const [products, setProducts] = useState<Product[]>([])
   const [categories, setCategories] = useState<Category[]>([])
-  const [searchQuery, setSearchQuery] = useState('')
   const [loading, setLoading] = useState(true)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
 
-  // Modales
-  const [showNewModal, setShowNewModal] = useState(false)
-  const [showCatModal, setShowCatModal] = useState(false)
+  // Estado Modal
+  const [isModalOpen, setIsModalOpen] = useState(false)
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
-
-  // Formulario Producto (Nuevo y Edición)
-  const [categoryId, setCategoryId] = useState('')
-  const [name, setName] = useState('')
-  const [price, setPrice] = useState('')
-  const [costPrice, setCostPrice] = useState('')
-  const [stock, setStock] = useState('10')
-  const [minStock, setMinStock] = useState('5')
-  const [imageUrl, setImageUrl] = useState('')
   const [saving, setSaving] = useState(false)
 
-  // Formulario Categoría
-  const [catName, setCatName] = useState('')
-  const [catPrefix, setCatPrefix] = useState('')
+  // Formulario
+  const [name, setName] = useState('')
+  const [skuCode, setSkuCode] = useState('')
+  const [categoryId, setCategoryId] = useState('')
+  const [price, setPrice] = useState('')
+  const [costPrice, setCostPrice] = useState('')
+  const [stock, setStock] = useState('')
+  const [minStock, setMinStock] = useState('5')
+  const [imageUrl, setImageUrl] = useState('')
 
-  // Surtir Stock + Cálculo de Costo Ponderado
-  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
-  const [addStockAmount, setAddStockAmount] = useState('')
-  const [newBatchCost, setNewBatchCost] = useState('')
+  // Campos de Promoción
+  const [promoType, setPromoType] = useState<'NONE' | 'COMBO_QTY'>('NONE')
+  const [promoQty, setPromoQty] = useState('')
+  const [promoPrice, setPromoPrice] = useState('')
 
   const fetchData = async () => {
     setLoading(true)
-    const { data: catData } = await supabase.from('categories').select('*').order('name', { ascending: true })
-    const { data: prodData } = await supabase.from('products').select('*').order('created_at', { ascending: false })
+    const { data: catData } = await supabase.from('categories').select('*').order('name')
+    const { data: prodData } = await supabase.from('products').select('*').order('name')
 
     if (catData) setCategories(catData)
     if (prodData) setProducts(prodData)
@@ -51,141 +48,90 @@ export default function ProductsPage() {
     fetchData()
   }, [])
 
-  // Al abrir el modal de surtir, precargar el costo actual
-  const openStockModal = (p: Product) => {
-    setSelectedProduct(p)
-    setAddStockAmount('')
-    setNewBatchCost((p.cost_price || 0).toString())
-  }
+  const openModal = (product?: Product) => {
+    if (product) {
+      setEditingProduct(product)
+      setName(product.name)
+      setSkuCode(product.sku_code)
+      setCategoryId(product.category_id || '')
+      setPrice(product.price.toString())
+      setCostPrice(product.cost_price ? product.cost_price.toString() : '')
+      setStock(product.stock.toString())
+      setMinStock(product.min_stock.toString())
+      setImageUrl(product.image_url || '')
 
-  // Crear Categoría
-  const handleCreateCategory = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!catName.trim() || !catPrefix.trim()) return
-
-    const { data, error } = await supabase
-      .from('categories')
-      .insert({
-        name: catName.trim(),
-        code_prefix: catPrefix.trim().toUpperCase().slice(0, 4)
-      })
-      .select()
-      .single()
-
-    if (error) {
-      alert('Error al crear categoría. Asegúrate de que el prefijo sea único.')
-    } else if (data) {
-      setCatName('')
-      setCatPrefix('')
-      setShowCatModal(false)
-      await fetchData()
-      setCategoryId(data.id)
-    }
-  }
-
-  // Abrir Modal de Edición
-  const openEditModal = (p: Product) => {
-    setEditingProduct(p)
-    setCategoryId(p.category_id || '')
-    setName(p.name)
-    setPrice(p.price.toString())
-    setCostPrice((p.cost_price || 0).toString())
-    setStock(p.stock.toString())
-    setMinStock((p.min_stock || 5).toString())
-    setImageUrl(p.image_url || '')
-  }
-
-  // Guardar Edición de Producto
-  const handleUpdateProduct = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!editingProduct || !name.trim() || !categoryId) return
-
-    setSaving(true)
-
-    try {
-      const { error } = await supabase
-        .from('products')
-        .update({
-          category_id: categoryId,
-          name: name.trim(),
-          price: parseFloat(price) || 0,
-          cost_price: parseFloat(costPrice) || 0,
-          stock: parseInt(stock) || 0,
-          min_stock: parseInt(minStock) || 5,
-          image_url: imageUrl.trim() || null
-        })
-        .eq('id', editingProduct.id)
-
-      if (error) throw error
-
+      // Cargar promoción si existe
+      const p = product as any
+      setPromoType(p.promo_type === 'COMBO_QTY' ? 'COMBO_QTY' : 'NONE')
+      setPromoQty(p.promo_qty ? p.promo_qty.toString() : '')
+      setPromoPrice(p.promo_price ? p.promo_price.toString() : '')
+    } else {
       setEditingProduct(null)
-      fetchData()
-    } catch (err) {
-      console.error(err)
-      alert('Error al actualizar el producto.')
-    } finally {
-      setSaving(false)
+      setName('')
+      setSkuCode(`PROD-${Math.floor(1000 + Math.random() * 9000)}`)
+      setCategoryId(categories[0]?.id || '')
+      setPrice('')
+      setCostPrice('')
+      setStock('0')
+      setMinStock('5')
+      setImageUrl('')
+
+      // Reset Promoción
+      setPromoType('NONE')
+      setPromoQty('')
+      setPromoPrice('')
     }
+    setIsModalOpen(true)
   }
 
-  // Eliminar Producto
-  const handleDeleteProduct = async (p: Product) => {
-    const confirmDelete = window.confirm(`¿Estás seguro de que deseas eliminar "${p.name}" (${p.sku_code}) del catálogo?`)
-    if (!confirmDelete) return
-
-    try {
-      const { error } = await supabase.from('products').delete().eq('id', p.id)
-      if (error) throw error
-
-      fetchData()
-    } catch (err) {
-      console.error(err)
-      alert('No se pudo eliminar el producto. Si ya tiene ventas asociadas, se recomienda mantenerlo inactivo.')
-    }
+  const closeModal = () => {
+    setIsModalOpen(false)
+    setEditingProduct(null)
   }
 
-  // Crear Producto Nuevo
-  const handleCreateProduct = async (e: React.FormEvent) => {
+  const handleSaveProduct = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!name.trim() || !categoryId) {
-      alert('Por favor selecciona una categoría e ingresa el nombre.')
+    if (!name || !price || !stock) {
+      alert('Por favor completa los campos obligatorios.')
       return
     }
 
     setSaving(true)
 
+    const productPayload = {
+      name: name.trim(),
+      sku_code: skuCode.trim(),
+      category_id: categoryId || null,
+      price: parseFloat(price) || 0,
+      cost_price: parseFloat(costPrice) || 0,
+      stock: parseInt(stock) || 0,
+      min_stock: parseInt(minStock) || 5,
+      image_url: imageUrl.trim() || null,
+      is_active: true,
+
+      // Guardar Promoción
+      promo_type: promoType,
+      promo_qty: promoType === 'COMBO_QTY' ? (parseInt(promoQty) || null) : null,
+      promo_price: promoType === 'COMBO_QTY' ? (parseFloat(promoPrice) || null) : null
+    }
+
     try {
-      const selectedCat = categories.find(c => c.id === categoryId)
-      const prefix = selectedCat ? selectedCat.code_prefix : 'GEN'
+      if (editingProduct) {
+        const { error } = await supabase
+          .from('products')
+          .update(productPayload)
+          .eq('id', editingProduct.id)
 
-      const { count } = await supabase
-        .from('products')
-        .select('*', { count: 'exact', head: true })
-        .eq('category_id', categoryId)
+        if (error) throw error
+      } else {
+        const { error } = await supabase
+          .from('products')
+          .insert(productPayload)
 
-      const nextNumber = (count || 0) + 1
-      const skuCode = `${prefix}-${nextNumber.toString().padStart(3, '0')}`
+        if (error) throw error
+      }
 
-      const { error } = await supabase.from('products').insert({
-        category_id: categoryId,
-        sku_code: skuCode,
-        name: name.trim(),
-        price: parseFloat(price) || 0,
-        cost_price: parseFloat(costPrice) || 0,
-        stock: parseInt(stock) || 0,
-        min_stock: parseInt(minStock) || 5,
-        image_url: imageUrl.trim() || null
-      })
-
-      if (error) throw error
-
-      setShowNewModal(false)
-      setName('')
-      setPrice('')
-      setCostPrice('')
-      setStock('10')
-      setMinStock('5')
-      setImageUrl('')
+      closeModal()
       fetchData()
     } catch (err) {
       console.error(err)
@@ -195,465 +141,310 @@ export default function ProductsPage() {
     }
   }
 
-  // Surtir Stock con Cálculo de Costo Promedio Ponderado
-  const handleAddStockWithWeightedCost = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!selectedProduct) return
-
-    const addedQty = parseInt(addStockAmount)
-    const newCostUnit = parseFloat(newBatchCost)
-
-    if (isNaN(addedQty) || addedQty <= 0) {
-      alert('Ingresa una cantidad válida a agregar.')
-      return
-    }
-
-    if (isNaN(newCostUnit) || newCostUnit < 0) {
-      alert('Ingresa un costo de compra válido.')
-      return
-    }
+  const handleDeleteProduct = async (id: string) => {
+    if (!confirm('¿Estás seguro de eliminar este producto?')) return
 
     try {
-      const currentStock = selectedProduct.stock > 0 ? selectedProduct.stock : 0
-      const currentCost = selectedProduct.cost_price || 0
-
-      // FÓRMULA DE COSTO PROMEDIO PONDERADO
-      let calculatedWeightedCost = newCostUnit
-      if (currentStock > 0) {
-        const totalPreviousValue = currentStock * currentCost
-        const totalNewValue = addedQty * newCostUnit
-        const totalStock = currentStock + addedQty
-        calculatedWeightedCost = (totalPreviousValue + totalNewValue) / totalStock
-      }
-
-      const finalStock = currentStock + addedQty
-
-      const { error } = await supabase
-        .from('products')
-        .update({
-          stock: finalStock,
-          cost_price: parseFloat(calculatedWeightedCost.toFixed(2))
-        })
-        .eq('id', selectedProduct.id)
-
+      const { error } = await supabase.from('products').delete().eq('id', id)
       if (error) throw error
-
-      setSelectedProduct(null)
-      setAddStockAmount('')
-      setNewBatchCost('')
       fetchData()
     } catch (err) {
       console.error(err)
-      alert('Error al surtir mercancía.')
+      alert('Error al eliminar producto.')
     }
   }
 
-  const filteredProducts = products.filter(p =>
-    p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    p.sku_code.toLowerCase().includes(searchQuery.toLowerCase())
-  )
-
-  // Cálculo rápido para previsualizar en el modal
-  const previewStock = (selectedProduct?.stock || 0) + (parseInt(addStockAmount) || 0)
-  const currentTotalVal = (selectedProduct?.stock || 0) * (selectedProduct?.cost_price || 0)
-  const newTotalVal = (parseInt(addStockAmount) || 0) * (parseFloat(newBatchCost) || 0)
-  const previewWeightedCost = previewStock > 0 ? (currentTotalVal + newTotalVal) / previewStock : 0
+  const filteredProducts = products.filter(product => {
+    const matchesCategory = selectedCategory ? product.category_id === selectedCategory : true
+    const matchesSearch = product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                          product.sku_code.toLowerCase().includes(searchQuery.toLowerCase())
+    return matchesCategory && matchesSearch
+  })
 
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-6">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+    <div className="p-6 max-w-7xl mx-auto space-y-6 font-sans">
+      
+      {/* ENCABEZADO */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Catálogo e Inventario</h1>
-          <p className="text-sm text-gray-500">Maneja productos, precios, costos, categorías y existencias.</p>
+          <h1 className="text-2xl font-bold text-gray-900">Catálogo de Productos</h1>
+          <p className="text-sm text-gray-500">Administra tus precios, inventario y promociones</p>
         </div>
 
-        <div className="flex gap-2">
-          <button
-            onClick={() => setShowCatModal(true)}
-            className="py-2.5 px-3 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-xl font-bold flex items-center gap-1.5 text-sm"
-          >
-            <Tag className="w-4 h-4 text-gray-600" />
-            Nueva Categoría
-          </button>
-          <button
-            onClick={() => {
-              setCategoryId('')
-              setName('')
-              setPrice('')
-              setCostPrice('')
-              setStock('10')
-              setMinStock('5')
-              setImageUrl('')
-              setShowNewModal(true)
-            }}
-            className="py-2.5 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold flex items-center gap-2 shadow-sm text-sm"
-          >
-            <Plus className="w-4 h-4" />
-            Nuevo Producto
-          </button>
+        <button
+          onClick={() => openModal()}
+          className="py-2.5 px-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-sm flex items-center gap-2 text-sm transition-all active:scale-[0.98]"
+        >
+          <Plus className="w-4 h-4" />
+          + Agregar Producto
+        </button>
+      </div>
+
+      {/* FILTROS Y BUSCADOR */}
+      <div className="flex flex-col sm:flex-row gap-3 bg-white p-3 rounded-2xl border border-gray-200 shadow-sm">
+        <div className="relative flex-1">
+          <Search className="absolute left-3.5 top-2.5 text-gray-400 w-4 h-4" />
+          <input
+            type="text"
+            placeholder="Buscar por nombre o código SKU..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-9 pr-4 py-1.5 bg-gray-50 rounded-xl border border-gray-200 text-xs focus:ring-2 focus:ring-blue-500"
+          />
         </div>
+
+        <select
+          value={selectedCategory || ''}
+          onChange={(e) => setSelectedCategory(e.target.value || null)}
+          className="p-1.5 bg-gray-50 border rounded-xl text-xs font-semibold text-gray-700"
+        >
+          <option value="">Todas las Categorías</option>
+          {categories.map(c => (
+            <option key={c.id} value={c.id}>{c.name}</option>
+          ))}
+        </select>
       </div>
 
-      <div className="relative">
-        <Search className="absolute left-3 top-3 text-gray-400 w-5 h-5" />
-        <input
-          type="text"
-          placeholder="Buscar producto por nombre o código..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          className="w-full pl-10 pr-4 py-2.5 bg-white rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-        />
-      </div>
-
+      {/* TABLA DE PRODUCTOS */}
       <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
-        <table className="w-full text-left border-collapse">
-          <thead>
-            <tr className="bg-gray-50 border-b border-gray-200 text-xs font-semibold text-gray-500 uppercase">
-              <th className="p-4">Código</th>
-              <th className="p-4">Producto</th>
-              <th className="p-4">Costo Promedio</th>
-              <th className="p-4">Precio Venta</th>
-              <th className="p-4">Stock Actual</th>
-              <th className="p-4 text-right">Acciones</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100 text-sm">
-            {loading ? (
-              <tr><td colSpan={6} className="p-6 text-center text-gray-400">Cargando inventario...</td></tr>
-            ) : filteredProducts.length === 0 ? (
-              <tr><td colSpan={6} className="p-6 text-center text-gray-400">No hay productos en el catálogo.</td></tr>
-            ) : (
-              filteredProducts.map(p => {
-                const isOutOfStock = p.stock <= 0
-                const isLowStock = p.stock > 0 && p.stock <= p.min_stock
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-gray-50 border-b border-gray-200 text-[11px] font-semibold text-gray-500 uppercase">
+                <th className="p-3">Producto</th>
+                <th className="p-3">Código</th>
+                <th className="p-3">Precio Venta</th>
+                <th className="p-3">Costo</th>
+                <th className="p-3">Promoción</th>
+                <th className="p-3">Stock</th>
+                <th className="p-3 text-right">Acciones</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100 text-xs">
+              {loading ? (
+                <tr><td colSpan={7} className="p-6 text-center text-gray-400">Cargando productos...</td></tr>
+              ) : filteredProducts.length === 0 ? (
+                <tr><td colSpan={7} className="p-6 text-center text-gray-400">No hay productos registrados.</td></tr>
+              ) : (
+                filteredProducts.map((p: any) => {
+                  const isLow = p.stock <= p.min_stock
+                  const hasPromo = p.promo_type === 'COMBO_QTY' && p.promo_qty && p.promo_price
 
-                return (
-                  <tr key={p.id} className="hover:bg-gray-50/50">
-                    <td className="p-4 font-mono text-xs font-bold text-gray-600">{p.sku_code}</td>
-                    <td className="p-4 font-bold text-gray-900 flex items-center gap-2">
-                      <Package className="w-4 h-4 text-gray-400" />
-                      {p.name}
-                    </td>
-                    <td className="p-4 text-gray-600 font-semibold">${(p.cost_price || 0).toFixed(2)}</td>
-                    <td className="p-4 font-extrabold text-gray-900">${p.price.toFixed(2)}</td>
-                    <td className="p-4">
-                      {isOutOfStock ? (
-                        <span className="text-xs font-bold text-red-600 bg-red-100 px-2.5 py-1 rounded-full">Agotado (0)</span>
-                      ) : isLowStock ? (
-                        <span className="text-xs font-bold text-amber-700 bg-amber-100 px-2.5 py-1 rounded-full inline-flex items-center gap-1">
-                          <AlertTriangle className="w-3 h-3" /> ¡Bajo ({p.stock})!
+                  return (
+                    <tr key={p.id} className="hover:bg-gray-50/50 transition-colors">
+                      <td className="p-3 font-bold text-gray-800 flex items-center gap-2">
+                        {p.image_url ? (
+                          <img src={p.image_url} alt={p.name} className="w-8 h-8 rounded-lg object-cover border" />
+                        ) : (
+                          <div className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center text-gray-400">
+                            <Package className="w-4 h-4" />
+                          </div>
+                        )}
+                        <span>{p.name}</span>
+                      </td>
+                      <td className="p-3 font-mono text-gray-500">{p.sku_code}</td>
+                      <td className="p-3 font-extrabold text-gray-900">${p.price.toFixed(2)}</td>
+                      <td className="p-3 text-gray-500">${(p.cost_price || 0).toFixed(2)}</td>
+                      <td className="p-3">
+                        {hasPromo ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-100 text-amber-800 rounded font-black text-[10px]">
+                            <Tag className="w-3 h-3" />
+                            {p.promo_qty}x${p.promo_price.toFixed(2)}
+                          </span>
+                        ) : (
+                          <span className="text-gray-400 text-[10px]">Sin Promo</span>
+                        )}
+                      </td>
+                      <td className="p-3">
+                        <span className={`font-bold px-2 py-0.5 rounded text-[10px] ${
+                          p.stock <= 0 ? 'bg-red-100 text-red-700' : isLow ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'
+                        }`}>
+                          {p.stock} unidades
                         </span>
-                      ) : (
-                        <span className="font-semibold text-gray-700">{p.stock} unidades</span>
-                      )}
-                    </td>
-                    <td className="p-4 text-right space-x-1">
-                      <button
-                        onClick={() => openEditModal(p)}
-                        className="py-1.5 px-2.5 bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-lg font-bold text-xs inline-flex items-center gap-1"
-                        title="Editar Precios y Datos"
-                      >
-                        <Edit3 className="w-3.5 h-3.5" />
-                        Editar
-                      </button>
-                      <button
-                        onClick={() => openStockModal(p)}
-                        className="py-1.5 px-2.5 bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-lg font-bold text-xs inline-flex items-center gap-1"
-                      >
-                        <ArrowUpCircle className="w-3.5 h-3.5" />
-                        Surtir
-                      </button>
-                      <button
-                        onClick={() => handleDeleteProduct(p)}
-                        className="p-1.5 bg-red-50 text-red-600 hover:bg-red-100 rounded-lg transition-colors inline-flex items-center justify-center"
-                        title="Eliminar producto"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </td>
-                  </tr>
-                )
-              })
-            )}
-          </tbody>
-        </table>
+                      </td>
+                      <td className="p-3 text-right">
+                        <div className="flex justify-end gap-1">
+                          <button onClick={() => openModal(p)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg">
+                            <Edit className="w-4 h-4" />
+                          </button>
+                          <button onClick={() => handleDeleteProduct(p.id)} className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg">
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
 
-      {/* MODAL: EDITAR PRODUCTO */}
-      {editingProduct && (
+      {/* MODAL CREAR / EDITAR PRODUCTO */}
+      {isModalOpen && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl space-y-4">
-            <h3 className="text-lg font-bold text-gray-900">Editar Producto: <span className="font-mono text-blue-600">{editingProduct.sku_code}</span></h3>
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl relative space-y-4 max-h-[90vh] overflow-y-auto">
+            <h3 className="text-lg font-bold text-gray-900">
+              {editingProduct ? 'Editar Producto' : 'Nuevo Producto'}
+            </h3>
 
-            <form onSubmit={handleUpdateProduct} className="space-y-3">
+            <form onSubmit={handleSaveProduct} className="space-y-3 text-xs">
               <div>
-                <label className="text-xs font-semibold text-gray-600">Categoría *</label>
-                <select
-                  required
-                  value={categoryId}
-                  onChange={(e) => setCategoryId(e.target.value)}
-                  className="w-full mt-1 p-2 bg-gray-50 border rounded-lg text-sm font-medium"
-                >
-                  <option value="">-- Selecciona una categoría --</option>
-                  {categories.map(c => (
-                    <option key={c.id} value={c.id}>{c.name} ({c.code_prefix})</option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="text-xs font-semibold text-gray-600">Nombre del Producto *</label>
+                <label className="font-bold text-gray-700 block mb-1">Nombre del Producto *</label>
                 <input
                   type="text"
                   required
+                  placeholder="Ej. Sabritas Sal 45g"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  className="w-full mt-1 p-2 bg-gray-50 border rounded-lg text-sm font-bold"
+                  className="w-full p-2.5 bg-gray-50 border rounded-xl focus:ring-2 focus:ring-blue-500"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="text-xs font-semibold text-gray-600">Costo Compra ($)</label>
+                  <label className="font-bold text-gray-700 block mb-1">Código / SKU</label>
                   <input
-                    type="number"
-                    step="0.01"
-                    value={costPrice}
-                    onChange={(e) => setCostPrice(e.target.value)}
-                    className="w-full mt-1 p-2 bg-gray-50 border rounded-lg text-sm font-bold text-gray-700"
+                    type="text"
+                    value={skuCode}
+                    onChange={(e) => setSkuCode(e.target.value)}
+                    className="w-full p-2 bg-gray-50 border rounded-xl font-mono"
                   />
                 </div>
+
                 <div>
-                  <label className="text-xs font-semibold text-gray-600">Precio Venta ($) *</label>
-                  <input
-                    type="number"
-                    required
-                    step="0.5"
-                    value={price}
-                    onChange={(e) => setPrice(e.target.value)}
-                    className="w-full mt-1 p-2 bg-gray-50 border rounded-lg text-sm font-bold text-blue-700"
-                  />
+                  <label className="font-bold text-gray-700 block mb-1">Categoría</label>
+                  <select
+                    value={categoryId}
+                    onChange={(e) => setCategoryId(e.target.value)}
+                    className="w-full p-2 bg-gray-50 border rounded-xl"
+                  >
+                    <option value="">Sin Categoría</option>
+                    {categories.map(c => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="text-xs font-semibold text-gray-600">Stock Actual</label>
+                  <label className="font-bold text-gray-700 block mb-1">Precio Público ($) *</label>
+                  <input
+                    type="number"
+                    required
+                    step="0.50"
+                    placeholder="18.00"
+                    value={price}
+                    onChange={(e) => setPrice(e.target.value)}
+                    className="w-full p-2 bg-gray-50 border rounded-xl font-bold text-gray-900 text-sm"
+                  />
+                </div>
+
+                <div>
+                  <label className="font-bold text-gray-700 block mb-1">Costo Proveedor ($)</label>
+                  <input
+                    type="number"
+                    step="0.50"
+                    placeholder="12.00"
+                    value={costPrice}
+                    onChange={(e) => setCostPrice(e.target.value)}
+                    className="w-full p-2 bg-gray-50 border rounded-xl"
+                  />
+                </div>
+              </div>
+
+              {/* SECCIÓN CONFIGURACIÓN DE PROMOCIÓN */}
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl space-y-2">
+                <label className="font-bold text-amber-900 flex items-center gap-1 text-xs">
+                  <Tag className="w-4 h-4 text-amber-600" /> Promoción Especial / Oferta
+                </label>
+
+                <div>
+                  <select
+                    value={promoType}
+                    onChange={(e: any) => setPromoType(e.target.value)}
+                    className="w-full p-2 bg-white border rounded-xl text-xs font-semibold"
+                  >
+                    <option value="NONE">Sin Promoción</option>
+                    <option value="COMBO_QTY">Combo por Cantidad (Ej. 2 por $10)</option>
+                  </select>
+                </div>
+
+                {promoType === 'COMBO_QTY' && (
+                  <div className="grid grid-cols-2 gap-2 pt-1">
+                    <div>
+                      <label className="font-bold text-amber-800 block mb-1">Piezas necesarias</label>
+                      <input
+                        type="number"
+                        placeholder="2"
+                        value={promoQty}
+                        onChange={(e) => setPromoQty(e.target.value)}
+                        className="w-full p-2 bg-white border rounded-xl font-bold"
+                      />
+                    </div>
+                    <div>
+                      <label className="font-bold text-amber-800 block mb-1">Precio del Combo ($)</label>
+                      <input
+                        type="number"
+                        step="0.50"
+                        placeholder="10.00"
+                        value={promoPrice}
+                        onChange={(e) => setPromoPrice(e.target.value)}
+                        className="w-full p-2 bg-white border rounded-xl font-bold text-emerald-700"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="font-bold text-gray-700 block mb-1">Stock Actual *</label>
                   <input
                     type="number"
                     required
                     value={stock}
                     onChange={(e) => setStock(e.target.value)}
-                    className="w-full mt-1 p-2 bg-gray-50 border rounded-lg text-sm"
+                    className="w-full p-2 bg-gray-50 border rounded-xl font-bold"
                   />
                 </div>
+
                 <div>
-                  <label className="text-xs font-semibold text-gray-600">Stock Mínimo (Alerta)</label>
+                  <label className="font-bold text-gray-700 block mb-1">Stock Mínimo</label>
                   <input
                     type="number"
                     value={minStock}
                     onChange={(e) => setMinStock(e.target.value)}
-                    className="w-full mt-1 p-2 bg-gray-50 border rounded-lg text-sm"
+                    className="w-full p-2 bg-gray-50 border rounded-xl"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="text-xs font-semibold text-gray-600">URL Imagen (Opcional)</label>
+                <label className="font-bold text-gray-700 block mb-1">URL de la Imagen (Opcional)</label>
                 <input
                   type="url"
+                  placeholder="https://ejemplo.com/imagen.jpg"
                   value={imageUrl}
                   onChange={(e) => setImageUrl(e.target.value)}
-                  className="w-full mt-1 p-2 bg-gray-50 border rounded-lg text-sm"
+                  className="w-full p-2 bg-gray-50 border rounded-xl text-xs"
                 />
               </div>
 
-              <div className="flex gap-2 pt-2">
+              <div className="flex gap-2 pt-3">
                 <button
                   type="button"
-                  onClick={() => setEditingProduct(null)}
-                  className="flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-lg text-xs font-bold"
+                  onClick={closeModal}
+                  className="flex-1 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded-xl transition-colors"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
                   disabled={saving}
-                  className="flex-1 py-2.5 bg-blue-600 text-white rounded-lg text-xs font-bold"
-                >
-                  {saving ? 'Guardando...' : 'Actualizar Cambios'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL: NUEVA CATEGORÍA */}
-      {showCatModal && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-xl space-y-4">
-            <h3 className="text-lg font-bold text-gray-900">Agregar Nueva Categoría</h3>
-            <form onSubmit={handleCreateCategory} className="space-y-3">
-              <div>
-                <label className="text-xs font-semibold text-gray-600">Nombre de Categoría *</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Ej. Papitas / Chicles / Refrescos"
-                  value={catName}
-                  onChange={(e) => setCatName(e.target.value)}
-                  className="w-full mt-1 p-2 bg-gray-50 border rounded-lg text-sm"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-semibold text-gray-600">Prefijo (3-4 Letras) *</label>
-                <input
-                  type="text"
-                  required
-                  maxLength={4}
-                  placeholder="Ej. SAB, GAL, BEB"
-                  value={catPrefix}
-                  onChange={(e) => setCatPrefix(e.target.value.toUpperCase())}
-                  className="w-full mt-1 p-2 bg-gray-50 border rounded-lg text-sm font-mono font-bold uppercase"
-                />
-              </div>
-              <div className="flex gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowCatModal(false)}
-                  className="flex-1 py-2 bg-gray-100 text-gray-700 rounded-lg text-xs font-bold"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 py-2 bg-blue-600 text-white rounded-lg text-xs font-bold"
-                >
-                  Guardar Categoría
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL: NUEVO PRODUCTO */}
-      {showNewModal && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl space-y-4">
-            <div className="flex justify-between items-center">
-              <h3 className="text-lg font-bold text-gray-900">Agregar Producto al Catálogo</h3>
-              <button
-                type="button"
-                onClick={() => { setShowNewModal(false); setShowCatModal(true); }}
-                className="text-xs text-blue-600 hover:underline font-bold"
-              >
-                + Crear Categoría
-              </button>
-            </div>
-
-            <form onSubmit={handleCreateProduct} className="space-y-3">
-              <div>
-                <label className="text-xs font-semibold text-gray-600">Categoría *</label>
-                <select
-                  required
-                  value={categoryId}
-                  onChange={(e) => setCategoryId(e.target.value)}
-                  className="w-full mt-1 p-2 bg-gray-50 border rounded-lg text-sm"
-                >
-                  <option value="">-- Selecciona una categoría --</option>
-                  {categories.map(c => (
-                    <option key={c.id} value={c.id}>{c.name} ({c.code_prefix})</option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="text-xs font-semibold text-gray-600">Nombre del Producto *</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Ej. Cheetos Flamin Hot 45g"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  className="w-full mt-1 p-2 bg-gray-50 border rounded-lg text-sm"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-xs font-semibold text-gray-600">Precio Venta ($) *</label>
-                  <input
-                    type="number"
-                    required
-                    step="0.5"
-                    placeholder="18.00"
-                    value={price}
-                    onChange={(e) => setPrice(e.target.value)}
-                    className="w-full mt-1 p-2 bg-gray-50 border rounded-lg text-sm font-bold"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-semibold text-gray-600">Costo Compra ($)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    placeholder="14.00"
-                    value={costPrice}
-                    onChange={(e) => setCostPrice(e.target.value)}
-                    className="w-full mt-1 p-2 bg-gray-50 border rounded-lg text-sm"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-xs font-semibold text-gray-600">Stock Inicial *</label>
-                  <input
-                    type="number"
-                    required
-                    value={stock}
-                    onChange={(e) => setStock(e.target.value)}
-                    className="w-full mt-1 p-2 bg-gray-50 border rounded-lg text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-semibold text-gray-600">Stock Mínimo (Alerta)</label>
-                  <input
-                    type="number"
-                    value={minStock}
-                    onChange={(e) => setMinStock(e.target.value)}
-                    className="w-full mt-1 p-2 bg-gray-50 border rounded-lg text-sm"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="text-xs font-semibold text-gray-600">URL Imagen (Opcional)</label>
-                <input
-                  type="url"
-                  placeholder="https://..."
-                  value={imageUrl}
-                  onChange={(e) => setImageUrl(e.target.value)}
-                  className="w-full mt-1 p-2 bg-gray-50 border rounded-lg text-sm"
-                />
-              </div>
-
-              <div className="flex gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowNewModal(false)}
-                  className="flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-lg text-xs font-bold"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={saving || categories.length === 0}
-                  className={`flex-1 py-2.5 rounded-lg text-xs font-bold text-white ${
-                    saving || categories.length === 0 ? 'bg-gray-300' : 'bg-blue-600 hover:bg-blue-700'
-                  }`}
+                  className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow transition-all active:scale-[0.98]"
                 >
                   {saving ? 'Guardando...' : 'Guardar Producto'}
                 </button>
@@ -663,89 +454,6 @@ export default function ProductsPage() {
         </div>
       )}
 
-      {/* MODAL: SURTIR STOCK + CÁLCULO PROMEDIO PONDERADO */}
-      {selectedProduct && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-xl space-y-4">
-            <div className="flex items-center gap-2 border-b pb-3">
-              <Calculator className="w-5 h-5 text-blue-600" />
-              <div>
-                <h3 className="text-base font-bold text-gray-900">Surtir Mercancía</h3>
-                <p className="text-xs text-gray-500">{selectedProduct.name} ({selectedProduct.sku_code})</p>
-              </div>
-            </div>
-
-            <div className="bg-gray-50 p-3 rounded-xl text-xs space-y-1">
-              <div className="flex justify-between">
-                <span className="text-gray-500">Stock Actual:</span>
-                <span className="font-bold text-gray-800">{selectedProduct.stock} unidades</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-500">Costo Actual:</span>
-                <span className="font-bold text-gray-800">${(selectedProduct.cost_price || 0).toFixed(2)} c/u</span>
-              </div>
-            </div>
-
-            <form onSubmit={handleAddStockWithWeightedCost} className="space-y-3">
-              <div>
-                <label className="text-xs font-semibold text-gray-600">Piezas Nuevas a Agregar (+)</label>
-                <input
-                  type="number"
-                  required
-                  min="1"
-                  placeholder="Ej. 3"
-                  value={addStockAmount}
-                  onChange={(e) => setAddStockAmount(e.target.value)}
-                  className="w-full mt-1 p-2 bg-gray-50 border rounded-lg text-sm font-bold text-blue-700"
-                />
-              </div>
-
-              <div>
-                <label className="text-xs font-semibold text-gray-600">Costo Unitario del Nuevo Lote ($)</label>
-                <input
-                  type="number"
-                  required
-                  step="0.01"
-                  placeholder="Ej. 15.00"
-                  value={newBatchCost}
-                  onChange={(e) => setNewBatchCost(e.target.value)}
-                  className="w-full mt-1 p-2 bg-gray-50 border rounded-lg text-sm font-bold text-gray-800"
-                />
-              </div>
-
-              {/* Previsualización del Promedio Ponderado */}
-              {parseInt(addStockAmount) > 0 && parseFloat(newBatchCost) >= 0 && (
-                <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl space-y-1 text-xs">
-                  <div className="flex justify-between font-semibold text-blue-900">
-                    <span>Nuevo Stock Total:</span>
-                    <span>{previewStock} unidades</span>
-                  </div>
-                  <div className="flex justify-between font-bold text-blue-900 pt-1 border-t border-blue-200/50">
-                    <span>Nuevo Costo Promedio:</span>
-                    <span className="text-sm font-black text-blue-700">${previewWeightedCost.toFixed(2)} c/u</span>
-                  </div>
-                </div>
-              )}
-
-              <div className="flex gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setSelectedProduct(null)}
-                  className="flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-lg text-xs font-bold"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold"
-                >
-                  Surtir y Actualizar
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
