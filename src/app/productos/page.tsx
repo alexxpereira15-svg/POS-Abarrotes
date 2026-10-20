@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Product, Category } from '@/types'
-import { Plus, Edit, Trash2, Search, Package, Image as ImageIcon, AlertTriangle, Tag } from 'lucide-react'
+import { Plus, Edit, Trash2, Search, Package, Tag, ArrowUpRight } from 'lucide-react'
 
 export default function ProductsPage() {
   const supabase = createClient()
@@ -14,12 +14,20 @@ export default function ProductsPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
 
-  // Estado Modal
+  // Modal Crear / Editar
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
   const [saving, setSaving] = useState(false)
 
-  // Formulario
+  // Modal Surtir Stock
+  const [isRestockModalOpen, setIsRestockModalOpen] = useState(false)
+  const [restockProduct, setRestockProduct] = useState<Product | null>(null)
+  const [restockQty, setRestockQty] = useState('')
+  const [restockUnitCost, setRestockUnitCost] = useState('')
+  const [newSellingPrice, setNewSellingPrice] = useState('')
+  const [restockProcessing, setRestockProcessing] = useState(false)
+
+  // Formulario Producto
   const [name, setName] = useState('')
   const [skuCode, setSkuCode] = useState('')
   const [categoryId, setCategoryId] = useState('')
@@ -60,7 +68,6 @@ export default function ProductsPage() {
       setMinStock(product.min_stock.toString())
       setImageUrl(product.image_url || '')
 
-      // Cargar promoción si existe
       const p = product as any
       setPromoType(p.promo_type === 'COMBO_QTY' ? 'COMBO_QTY' : 'NONE')
       setPromoQty(p.promo_qty ? p.promo_qty.toString() : '')
@@ -76,7 +83,6 @@ export default function ProductsPage() {
       setMinStock('5')
       setImageUrl('')
 
-      // Reset Promoción
       setPromoType('NONE')
       setPromoQty('')
       setPromoPrice('')
@@ -87,6 +93,62 @@ export default function ProductsPage() {
   const closeModal = () => {
     setIsModalOpen(false)
     setEditingProduct(null)
+  }
+
+  // Abrir modal de Surtir Stock
+  const openRestockModal = (product: Product) => {
+    setRestockProduct(product)
+    setRestockQty('')
+    setRestockUnitCost(product.cost_price ? product.cost_price.toString() : '')
+    setNewSellingPrice(product.price.toString())
+    setIsRestockModalOpen(true)
+  }
+
+  // Guardar Surtido con Costo Promedio Ponderado
+  const handleSaveRestock = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!restockProduct) return
+
+    const qtyToAdd = parseInt(restockQty) || 0
+    const newUnitCost = parseFloat(restockUnitCost) || 0
+    const updatedSalePrice = parseFloat(newSellingPrice) || restockProduct.price
+
+    if (qtyToAdd <= 0) {
+      alert('Ingresa una cantidad válida mayor a 0.')
+      return
+    }
+
+    setRestockProcessing(true)
+
+    try {
+      const currentStock = restockProduct.stock || 0
+      const currentCost = restockProduct.cost_price || 0
+
+      // Cálculo de Costo Promedio Ponderado
+      const totalNewStock = currentStock + qtyToAdd
+      const weightedCost = totalNewStock > 0 
+        ? ((currentStock * currentCost) + (qtyToAdd * newUnitCost)) / totalNewStock 
+        : newUnitCost
+
+      const { error } = await supabase
+        .from('products')
+        .update({
+          stock: totalNewStock,
+          cost_price: parseFloat(weightedCost.toFixed(2)),
+          price: updatedSalePrice
+        })
+        .eq('id', restockProduct.id)
+
+      if (error) throw error
+
+      setIsRestockModalOpen(false)
+      fetchData()
+    } catch (err) {
+      console.error(err)
+      alert('Error al surtir inventario.')
+    } finally {
+      setRestockProcessing(false)
+    }
   }
 
   const handleSaveProduct = async (e: React.FormEvent) => {
@@ -109,7 +171,6 @@ export default function ProductsPage() {
       image_url: imageUrl.trim() || null,
       is_active: true,
 
-      // Guardar Promoción
       promo_type: promoType,
       promo_qty: promoType === 'COMBO_QTY' ? (parseInt(promoQty) || null) : null,
       promo_price: promoType === 'COMBO_QTY' ? (parseFloat(promoPrice) || null) : null
@@ -168,7 +229,7 @@ export default function ProductsPage() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Catálogo de Productos</h1>
-          <p className="text-sm text-gray-500">Administra tus precios, inventario y promociones</p>
+          <p className="text-sm text-gray-500">Administra tus precios, inventario, surtidos y promociones</p>
         </div>
 
         <button
@@ -214,7 +275,7 @@ export default function ProductsPage() {
                 <th className="p-3">Producto</th>
                 <th className="p-3">Código</th>
                 <th className="p-3">Precio Venta</th>
-                <th className="p-3">Costo</th>
+                <th className="p-3">Costo Promedio</th>
                 <th className="p-3">Promoción</th>
                 <th className="p-3">Stock</th>
                 <th className="p-3 text-right">Acciones</th>
@@ -263,7 +324,17 @@ export default function ProductsPage() {
                         </span>
                       </td>
                       <td className="p-3 text-right">
-                        <div className="flex justify-end gap-1">
+                        <div className="flex justify-end items-center gap-1">
+                          {/* BOTÓN SURTIR STOCK */}
+                          <button
+                            onClick={() => openRestockModal(p)}
+                            className="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold rounded-lg text-[10px] flex items-center gap-1 transition-colors border border-emerald-200"
+                            title="Surtir o ingresar nuevo lote"
+                          >
+                            <ArrowUpRight className="w-3 h-3" />
+                            Surtir
+                          </button>
+
                           <button onClick={() => openModal(p)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg">
                             <Edit className="w-4 h-4" />
                           </button>
@@ -280,6 +351,78 @@ export default function ProductsPage() {
           </table>
         </div>
       </div>
+
+      {/* MODAL SURTIR STOCK */}
+      {isRestockModalOpen && restockProduct && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl relative space-y-4">
+            <div className="border-b pb-2">
+              <h3 className="text-base font-bold text-gray-900">📦 Surtir Mercancía</h3>
+              <p className="text-xs text-blue-600 font-semibold">{restockProduct.name}</p>
+            </div>
+
+            <form onSubmit={handleSaveRestock} className="space-y-3 text-xs">
+              <div className="p-2.5 bg-gray-50 rounded-xl flex justify-between text-gray-600">
+                <span>Stock Actual: <strong className="text-gray-900">{restockProduct.stock} pzas</strong></span>
+                <span>Costo Actual: <strong className="text-gray-900">${(restockProduct.cost_price || 0).toFixed(2)}</strong></span>
+              </div>
+
+              <div>
+                <label className="font-bold text-gray-700 block mb-1">Cantidad comprada (Piezas nuevas) *</label>
+                <input
+                  type="number"
+                  required
+                  placeholder="Ej. 12"
+                  value={restockQty}
+                  onChange={(e) => setRestockQty(e.target.value)}
+                  className="w-full p-2.5 bg-gray-50 border rounded-xl font-bold text-gray-900 focus:ring-2 focus:ring-blue-500 text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="font-bold text-gray-700 block mb-1">Costo Unitario de Compra ($) *</label>
+                <input
+                  type="number"
+                  required
+                  step="0.10"
+                  placeholder="Ej. 10.50"
+                  value={restockUnitCost}
+                  onChange={(e) => setRestockUnitCost(e.target.value)}
+                  className="w-full p-2.5 bg-gray-50 border rounded-xl font-bold text-emerald-800 focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="font-bold text-gray-700 block mb-1">Precio de Venta al Público ($)</label>
+                <input
+                  type="number"
+                  step="0.50"
+                  value={newSellingPrice}
+                  onChange={(e) => setNewSellingPrice(e.target.value)}
+                  className="w-full p-2.5 bg-gray-50 border rounded-xl font-black text-gray-900"
+                />
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsRestockModalOpen(false)}
+                  className="flex-1 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded-xl transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={restockProcessing}
+                  className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow transition-all active:scale-[0.98]"
+                >
+                  {restockProcessing ? 'Guardando...' : 'Confirmar Surtido'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* MODAL CREAR / EDITAR PRODUCTO */}
       {isModalOpen && (
@@ -355,7 +498,7 @@ export default function ProductsPage() {
                 </div>
               </div>
 
-              {/* SECCIÓN CONFIGURACIÓN DE PROMOCIÓN */}
+              {/* SECCIÓN PROMOCIÓN */}
               <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl space-y-2">
                 <label className="font-bold text-amber-900 flex items-center gap-1 text-xs">
                   <Tag className="w-4 h-4 text-amber-600" /> Promoción Especial / Oferta
